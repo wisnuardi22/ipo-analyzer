@@ -35,3 +35,6 @@ app.include_router(analyze_router)
 @app.get('/')
 def root():
     return {'message': 'IPO Analyzer API is running! 🚀'}
+
+    # Di baris paling bawah main.py
+app = app # Alias agar Vercel mudah menemukannya
