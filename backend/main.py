@@ -10,12 +10,18 @@ load_dotenv()
 
 app = FastAPI(title="IPO Analyzer API", version="1.0.0")
 
+# --- BAGIAN YANG DIPERBAIKI ---
 app.add_middleware(
+    CORSMiddleware, # <--- Tambahkan ini sebagai argumen pertama
     allow_origins=[
-    "http://localhost:5173",
-    "https://*.vercel.app",
-],
+        "http://localhost:5173",
+        "https://*.vercel.app", 
+    ],
+    allow_credentials=True, # Biasanya dibutuhkan untuk request dari frontend
+    allow_methods=["*"],    # Mengizinkan semua method (GET, POST, PUT, DELETE, dll)
+    allow_headers=["*"],    # Mengizinkan semua header
 )
+# ------------------------------
 
 os.makedirs('uploads', exist_ok=True)
 
