@@ -1,29 +1,26 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from mangum import Mangum
+
+# Import internal - gunakan titik (.) untuk menandakan folder yang sama
 from database.db import create_tables
 from routes.upload import router as upload_router
 from routes.analyze import router as analyze_router
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 app = FastAPI(title="IPO Analyzer API", version="1.0.0")
 
-# --- BAGIAN YANG DIPERBAIKI ---
 app.add_middleware(
-    CORSMiddleware, # <--- Tambahkan ini sebagai argumen pertama
-    allow_origins=[
-        "http://localhost:5173",
-        "https://*.vercel.app", 
-    ],
-    allow_credentials=True, # Biasanya dibutuhkan untuk request dari frontend
-    allow_methods=["*"],    # Mengizinkan semua method (GET, POST, PUT, DELETE, dll)
-    allow_headers=["*"],    # Mengizinkan semua header
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-# ------------------------------
 
-os.makedirs('uploads', exist_ok=True)
+# Setup folder upload (Vercel /tmp)
+UPLOAD_DIR = "/tmp/uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @app.on_event('startup')
 def startup_event():
@@ -36,5 +33,5 @@ app.include_router(analyze_router)
 def root():
     return {'message': 'IPO Analyzer API is running! 🚀'}
 
-    # Di baris paling bawah main.py
-app = app # Alias agar Vercel mudah menemukannya
+# SANGAT PENTING: Gunakan Mangum tanpa argumen tambahan yang rumit
+handler = Mangum(app, lifespan="off")
