@@ -7,7 +7,8 @@ import shutil
 import uuid
 
 router = APIRouter(prefix="/api", tags=["upload"])
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/tmp/uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.post("/upload")
 async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)):
