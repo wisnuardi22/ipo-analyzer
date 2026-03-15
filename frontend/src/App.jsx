@@ -933,10 +933,10 @@ export default function App() {
               onClick={() => go("home")}
             >
               <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center">
-                <TrendingUp className="w-6 h-6 text-white" />
+                <BarChart2 className="w-6 h-6 text-white" />
               </div>
               <span className="text-xl font-bold text-gray-900 dark:text-white">
-                Id IPO Analysis
+                Indonesian IPO Analysis
               </span>
             </div>
             <nav className="hidden md:flex items-center gap-8">
@@ -2231,15 +2231,15 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <div className="flex items-center justify-center gap-2 mb-4">
             <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center">
-              <TrendingUp className="w-6 h-6 text-white" />
+              <BarChart2 className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xl font-bold">Id IPO Analysis</span>
+            <span className="text-xl font-bold">Indonesian IPO Analysis</span>
           </div>
           <p className="text-gray-400 mb-4">
             Powered by Gemini AI • {l.footer}
           </p>
           <p className="text-gray-500 text-sm">
-            &copy; 2026 Id IPO Analysis. All rights reserved.
+            &copy; 2026 Indonesian IPO Analysis. All rights reserved.
           </p>
         </div>
       </footer>
