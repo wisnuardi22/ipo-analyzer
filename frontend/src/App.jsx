@@ -109,7 +109,7 @@ const TradingViewMiniChart = forwardRef(({ symbol }, ref) => {
   return <div ref={ref} />;
 });
 
-const API_BASE = "http://localhost:8000/api";
+const API_BASE = "https://ipo-analyzer-production.up.railway.app/api";
 
 // ── TRANSLATIONS ──────────────────────────────────────────────
 const T = {
