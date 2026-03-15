@@ -20,20 +20,31 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
         analysis.risks = json.dumps(result.get("risks", []))
         analysis.benefits = json.dumps(result.get("benefits", []))
         analysis.financial_data = json.dumps(result.get("financial", {}))
+
+        # Simpan semua data IPO termasuk ticker dan kpi
         analysis.ipo_details = json.dumps({
-        "sector": result.get("sector", ""),
-        "ipo_date": result.get("ipo_date", ""),
-        "share_price": result.get("share_price", ""),
-        "total_shares": result.get("total_shares", ""),
-        "use_of_funds": result.get("use_of_funds", [])
+            "ticker": result.get("ticker", ""),
+            "sector": result.get("sector", ""),
+            "ipo_date": result.get("ipo_date", ""),
+            "share_price": result.get("share_price", ""),
+            "total_shares": result.get("total_shares", ""),
+            "market_cap": result.get("market_cap", ""),
+            "use_of_funds": result.get("use_of_funds", []),
+            "kpi": result.get("kpi", {})
         })
+
         db.commit()
         db.refresh(analysis)
 
-        return {"message": "Analisis selesai", "analysis_id": analysis_id, "company_name": analysis.company_name}
+        return {
+            "message": "Analisis selesai",
+            "analysis_id": analysis_id,
+            "company_name": analysis.company_name
+        }
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Gagal menganalisis: {str(e)}")
+
 
 @router.get("/analysis/{analysis_id}")
 def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
@@ -41,13 +52,18 @@ def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
     if not analysis:
         raise HTTPException(status_code=404, detail="Data tidak ditemukan")
 
+    ipo_details = json.loads(analysis.ipo_details) if analysis.ipo_details else {}
+    financial = json.loads(analysis.financial_data) if analysis.financial_data else {}
+
     return {
         "id": analysis.id,
         "company_name": analysis.company_name,
+        "ticker": ipo_details.get("ticker", ""),
+        "sector": ipo_details.get("sector", ""),
         "summary": analysis.summary,
         "risks": json.loads(analysis.risks) if analysis.risks else [],
         "benefits": json.loads(analysis.benefits) if analysis.benefits else [],
-        "financial": json.loads(analysis.financial_data) if analysis.financial_data else {},
-        "ipo_details": json.loads(analysis.ipo_details) if analysis.ipo_details else {},
+        "financial": financial,
+        "ipo_details": ipo_details,
         "created_at": str(analysis.created_at)
     }

@@ -109,7 +109,7 @@ const TradingViewMiniChart = forwardRef(({ symbol }, ref) => {
   return <div ref={ref} />;
 });
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+const API_BASE = "http://localhost:8000/api";
 
 // ── TRANSLATIONS ──────────────────────────────────────────────
 const T = {
@@ -122,7 +122,7 @@ const T = {
     },
     hero: {
       badge: "Powered by Gemini AI",
-      title: "Smart IPO Analysis with Gemini AI",
+      title: "Indonesian IPO Analysis with Gemini AI",
       subtitle:
         "Transform complex IPO prospectuses into actionable insights with artificial intelligence",
       ab_t: "About",
@@ -141,19 +141,17 @@ const T = {
       free: "Free",
       pro: "Pro",
       bf: [
-        "Company profile analysis",
-        "Basic financial metrics",
-        "IPO pricing overview",
-        "4-year trend charts",
-        "Standard risk assessment",
+        "Comprehensive Company Profile",
+        "Use of Proceeds Overview",
+        "IPO Offering Summary",
+        "Standard Risk Assessment",
       ],
       pf: [
         "Everything in Basic",
-        "Advanced risk modeling",
-        "Detailed use of proceeds",
-        "Competitive analysis",
-        "AI-powered predictions",
-        "Priority support",
+        "Industry-Specific KPIs",
+        "Comprehensive Financial Highlights",
+        "Revenue, EBITDA & Profit Trends",
+        "Advanced Risk Analysis",
       ],
       pop: "Most Popular",
       sel: "Select Plan",
@@ -172,7 +170,7 @@ const T = {
       uploaded: "File uploaded! Click Analyze to start.",
     },
     about: {
-      title: "About IPO Analysis",
+      title: "About Indonesian IPO Analysis",
       sub: "Revolutionizing IPO investment decisions with cutting-edge AI technology",
       mt: "Our Mission",
       md: "To democratize access to sophisticated IPO analysis. We believe every investor deserves institutional-grade insights.",
@@ -220,7 +218,7 @@ const T = {
     },
     dash: {
       badge: "Analysis Complete",
-      title: "AI-Powered IPO Analysis",
+      title: "AI-Powered Indonesian IPO Analysis",
       profile: "Company Profile",
       about_co: "About Company",
       sector: "Sector",
@@ -265,7 +263,7 @@ const T = {
       regl: "Register",
       out: "Logout",
     },
-    footer: "Making IPO investing smarter",
+    footer: "Making Indonesian IPO investing smarter",
   },
   ID: {
     nav: {
@@ -276,7 +274,7 @@ const T = {
     },
     hero: {
       badge: "Didukung Gemini AI",
-      title: "Analisis IPO Cerdas dengan Gemini AI",
+      title: "Indonesian IPO Analysis — Cerdas dengan Gemini AI",
       subtitle:
         "Ubah prospektus IPO yang kompleks menjadi wawasan investasi actionable dengan kecerdasan buatan",
       ab_t: "Tentang",
@@ -295,19 +293,17 @@ const T = {
       free: "Gratis",
       pro: "Pro",
       bf: [
-        "Analisis profil perusahaan",
-        "Metrik keuangan dasar",
-        "Ikhtisar harga IPO",
-        "Grafik tren 4 tahun",
-        "Penilaian risiko standar",
+        "Profil Perusahaan Lengkap",
+        "Ikhtisar Penggunaan Dana IPO",
+        "Ringkasan Penawaran IPO",
+        "Penilaian Risiko Standar",
       ],
       pf: [
         "Semua fitur Dasar",
-        "Pemodelan risiko lanjutan",
-        "Detail penggunaan dana",
-        "Analisis kompetitif",
-        "Prediksi berbasis AI",
-        "Dukungan prioritas",
+        "KPI Spesifik Industri",
+        "Sorotan Keuangan Komprehensif",
+        "Tren Revenue, EBITDA & Laba",
+        "Analisis Risiko Mendalam",
       ],
       pop: "Paling Populer",
       sel: "Pilih Paket",
@@ -326,7 +322,7 @@ const T = {
       uploaded: "File terupload! Klik Analisis untuk mulai.",
     },
     about: {
-      title: "Tentang IPO Analysis",
+      title: "Tentang Indonesian IPO Analysis",
       sub: "Merevolusi keputusan investasi IPO dengan AI terdepan",
       mt: "Misi Kami",
       md: "Mendemokratisasi akses ke analisis IPO canggih. Setiap investor berhak mendapat wawasan tingkat institusional.",
@@ -374,7 +370,7 @@ const T = {
     },
     dash: {
       badge: "Analisis Selesai",
-      title: "Analisis IPO Bertenaga AI",
+      title: "Analisis Indonesian IPO — Bertenaga AI",
       profile: "Profil Perusahaan",
       about_co: "Tentang Perusahaan",
       sector: "Sektor",
@@ -419,7 +415,7 @@ const T = {
       regl: "Daftar",
       out: "Keluar",
     },
-    footer: "Membuat investasi IPO lebih cerdas",
+    footer: "Membuat investasi Indonesian IPO lebih cerdas",
   },
 };
 
@@ -724,13 +720,14 @@ export default function App() {
         company: {
           name: d.company_name || MOCK.company.name,
           ticker,
-          sector: d.sector || "",
+          sector: d.sector || d.ipo_details?.sector || "",
           description: d.summary || MOCK.company.description,
           ipoDate: d.ipo_details?.ipo_date || MOCK.company.ipoDate,
           offerPrice: d.ipo_details?.share_price || MOCK.company.offerPrice,
           currentPrice: d.ipo_details?.share_price || MOCK.company.currentPrice,
           totalShares: d.ipo_details?.total_shares || MOCK.company.totalShares,
-          marketCap: d.ipo_details?.market_cap || MOCK.company.marketCap,
+          marketCap:
+            d.ipo_details?.market_cap || d.market_cap || MOCK.company.marketCap,
           currency: d.financial?.currency || "IDR",
         },
         kpi: {
@@ -739,7 +736,13 @@ export default function App() {
           roe: d.ipo_details?.kpi?.roe || MOCK.kpi.roe,
           der: d.ipo_details?.kpi?.der || MOCK.kpi.der,
           eps: d.ipo_details?.kpi?.eps || MOCK.kpi.eps,
-          mktcap: d.ipo_details?.market_cap || MOCK.kpi.mktcap,
+          mktcap: d.ipo_details?.market_cap || d.market_cap || MOCK.kpi.mktcap,
+          // KPI tambahan spesifik industri dari AI
+          ...Object.fromEntries(
+            Object.entries(d.ipo_details?.kpi || {}).filter(
+              ([k]) => !["pe", "pb", "roe", "der", "eps", "mktcap"].includes(k),
+            ),
+          ),
         },
         financialTrends: {
           revenue:
@@ -933,7 +936,7 @@ export default function App() {
                 <TrendingUp className="w-6 h-6 text-white" />
               </div>
               <span className="text-xl font-bold text-gray-900 dark:text-white">
-                IPO Analysis
+                Id IPO Analysis
               </span>
             </div>
             <nav className="hidden md:flex items-center gap-8">
@@ -1335,17 +1338,6 @@ export default function App() {
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                {D.company.ticker && (
-                  <a
-                    href={`https://stockbit.com/symbol/${D.company.ticker}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg font-semibold text-sm transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    {l.dash.stockbit}
-                  </a>
-                )}
                 <button
                   onClick={() => {
                     setReady(false);
@@ -1362,10 +1354,9 @@ export default function App() {
               </div>
             </div>
 
-            {/* ── TRADINGVIEW LIVE PRICE SECTION ── */}
+            {/* ── IPO SUMMARY CARDS ── */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-6 mb-8 text-white">
-              {/* Top row: static info cards */}
-              <div className="grid grid-cols-3 gap-4 mb-5">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-white/5 rounded-xl p-4 border border-white/10">
                   <p className="text-gray-400 text-xs mb-1">{l.dash.offer}</p>
                   <p className="text-xl font-bold text-white">
@@ -1373,81 +1364,72 @@ export default function App() {
                   </p>
                 </div>
                 <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+                  <p className="text-gray-400 text-xs mb-1">{l.dash.cur}</p>
+                  {D.company.ticker ? (
+                    <a
+                      href={`https://www.tradingview.com/chart/?symbol=IDX:${D.company.ticker}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-bold text-sm mt-1"
+                    >
+                      <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse mr-1"></span>
+                      IDX:{D.company.ticker}
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  ) : (
+                    <p className="text-gray-400 text-sm mt-1">
+                      {lang === "EN" ? "Not yet listed" : "Belum listing"}
+                    </p>
+                  )}
+                </div>
+                <div className="bg-white/5 rounded-xl p-4 border border-white/10">
                   <p className="text-gray-400 text-xs mb-1">{l.dash.shares}</p>
-                  <p className="text-xl font-bold text-white truncate">
+                  <p className="text-base font-bold text-white leading-tight">
                     {D.company.totalShares}
                   </p>
                 </div>
                 <div className="bg-white/5 rounded-xl p-4 border border-white/10">
                   <p className="text-gray-400 text-xs mb-1">{l.dash.mktcap}</p>
-                  <p className="text-xl font-bold text-white">{D.kpi.mktcap}</p>
+                  <p className="text-xl font-bold text-white">
+                    {D.company.marketCap || D.kpi.mktcap}
+                  </p>
                 </div>
               </div>
-
-              {/* TradingView widgets — only render when ticker exists */}
-              {D.company.ticker ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {/* Single Quote: harga + % change real-time */}
-                  <div className="bg-white/5 rounded-xl border border-white/10 overflow-hidden">
-                    <p className="text-gray-400 text-xs px-4 pt-3 pb-1 flex items-center gap-1.5">
-                      <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                      Current Price · IDX:{D.company.ticker} · TradingView
-                      (Real-time)
-                    </p>
-                    <TradingViewSingleQuote
-                      ref={tvSymbolRef}
-                      symbol={`IDX:${D.company.ticker}`}
-                    />
-                  </div>
-
-                  {/* Mini Chart: grafik 1 bulan */}
-                  <div className="bg-white/5 rounded-xl border border-white/10 overflow-hidden">
-                    <p className="text-gray-400 text-xs px-4 pt-3 pb-1 flex items-center gap-1.5">
-                      <TrendingUp className="w-3.5 h-3.5 text-blue-400" />
-                      Chart 1 Bulan · Klik untuk chart lengkap
-                    </p>
-                    <TradingViewMiniChart
-                      ref={tvMiniChartRef}
-                      symbol={`IDX:${D.company.ticker}`}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-white/5 rounded-xl border border-white/10 p-4 text-center text-gray-400 text-sm">
-                  Ticker tidak ditemukan — live chart tidak tersedia
-                </div>
-              )}
             </div>
 
             {/* ── COMPANY PROFILE ── */}
             <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-8 mb-8">
-              <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-                {l.dash.profile}
-              </h3>
-              <div className="flex flex-wrap items-center gap-4 mb-5">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-500 dark:text-gray-400">
-                    {l.dash.ipo_date}:
-                  </span>
-                  <span className="font-semibold text-gray-900 dark:text-white">
-                    {D.company.ipoDate}
-                  </span>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                    {D.company.name}
+                  </h3>
+                  {D.company.ticker && (
+                    <span className="inline-block mt-1 font-mono bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-sm font-bold px-3 py-1 rounded-full">
+                      {D.company.ticker}
+                    </span>
+                  )}
                 </div>
-                {D.company.sector && (
+                <div className="flex flex-wrap gap-3">
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-gray-500 dark:text-gray-400">
-                      {l.dash.sector}:
+                      {l.dash.ipo_date}:
                     </span>
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {D.company.ipoDate}
+                    </span>
+                  </div>
+                  {D.company.sector && (
                     <span className="inline-flex items-center bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-semibold px-3 py-1 rounded-full">
                       {D.company.sector}
                     </span>
-                  </div>
-                )}
-                {D.company.currency && D.company.currency !== "IDR" && (
-                  <span className="inline-flex items-center gap-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs font-semibold px-3 py-1 rounded-full">
-                    📊 Financial reports in {D.company.currency}
-                  </span>
-                )}
+                  )}
+                  {D.company.currency && D.company.currency !== "IDR" && (
+                    <span className="inline-flex items-center gap-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs font-semibold px-3 py-1 rounded-full">
+                      📊 Laporan dalam {D.company.currency}
+                    </span>
+                  )}
+                </div>
               </div>
               <h4 className="text-base font-semibold text-gray-700 dark:text-gray-300 mb-3">
                 {l.dash.about_co}
@@ -1464,8 +1446,14 @@ export default function App() {
               <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
                 {l.dash.kpi}
               </h3>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                {[
+              {(() => {
+                const extraColors = [
+                  "text-teal-600 dark:text-teal-400",
+                  "text-rose-600 dark:text-rose-400",
+                  "text-indigo-600 dark:text-indigo-400",
+                  "text-amber-600 dark:text-amber-400",
+                ];
+                const stdKpis = [
                   {
                     label: l.dash.pe,
                     val: D.kpi.pe,
@@ -1496,18 +1484,38 @@ export default function App() {
                     val: D.kpi.mktcap,
                     color: "text-pink-600 dark:text-pink-400",
                   },
-                ].map((k, i) => (
-                  <div
-                    key={i}
-                    className="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-200 dark:border-gray-700 shadow-sm text-center"
-                  >
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                      {k.label}
-                    </p>
-                    <p className={`text-xl font-bold ${k.color}`}>{k.val}</p>
+                ];
+                const skipKeys = ["pe", "pb", "roe", "der", "eps", "mktcap"];
+                const extraKpis = Object.entries(D.kpi)
+                  .filter(([k, v]) => !skipKeys.includes(k) && v)
+                  .map(([k, v], i) => ({
+                    label: k.replace(/_/g, " ").toUpperCase(),
+                    val: v,
+                    color: extraColors[i % extraColors.length],
+                  }));
+                const allKpis = [...stdKpis, ...extraKpis];
+                const gridClass =
+                  allKpis.length <= 6
+                    ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-6"
+                    : "grid-cols-2 md:grid-cols-3 lg:grid-cols-4";
+                return (
+                  <div className={`grid ${gridClass} gap-4`}>
+                    {allKpis.map((k, i) => (
+                      <div
+                        key={i}
+                        className="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-200 dark:border-gray-700 shadow-sm text-center"
+                      >
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                          {k.label}
+                        </p>
+                        <p className={`text-lg font-bold ${k.color}`}>
+                          {k.val}
+                        </p>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                );
+              })()}
             </div>
 
             {/* ── FINANCIAL CHARTS (2x2 grid) ── */}
@@ -2225,13 +2233,13 @@ export default function App() {
             <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center">
               <TrendingUp className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xl font-bold">IPO Analysis</span>
+            <span className="text-xl font-bold">Id IPO Analysis</span>
           </div>
           <p className="text-gray-400 mb-4">
             Powered by Gemini AI • {l.footer}
           </p>
           <p className="text-gray-500 text-sm">
-            &copy; 2026 IPO Analysis. All rights reserved.
+            &copy; 2026 Id IPO Analysis. All rights reserved.
           </p>
         </div>
       </footer>
