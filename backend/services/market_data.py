@@ -1,11 +1,10 @@
 """
 services/market_data.py
 
-Dua fungsi utama:
-  - get_ticker_from_google(company_name, ticker_hint)
-      → verifikasi / cari ticker saham via Google Search
-  - get_market_data(ticker)
-      → scrape data live dari Google Finance
+Fungsi utama:
+  - get_ticker_from_google(company_name)        → cari ticker via Google Search
+  - get_market_data(ticker)                     → scrape harga live Google Finance
+  - get_underwriter_track_record(underwriters)  → cari track record penjamin efek
 """
 
 import re
@@ -27,99 +26,86 @@ HEADERS = {
 TIMEOUT = 10
 
 
-# ── 1. Cari / verifikasi ticker via Google Search ─────────────────────────────
+# ── 1. Cari ticker via Google Search ─────────────────────────────────────────
 
-def get_ticker_from_google(company_name: str, ticker_hint: str = "") -> str | None:
+def get_ticker_from_google(company_name: str) -> str | None:
     """
-    Cari kode saham via Google Search.
-
-    Strategi:
-    1. Jika ticker_hint tersedia, coba verifikasi langsung ke Google Finance
-    2. Jika tidak valid, lakukan Google Search untuk cari ticker yang benar
-    3. Return ticker dalam format 4 huruf IDX, e.g. "SUPA"
+    Cari kode saham IDX via Google Search.
+    Return: ticker 4 huruf kapital, e.g. "MGRO"
+    Tidak pakai ticker_hint dari prospektus — langsung Google.
     """
-    # ── Coba verifikasi ticker_hint dulu ──
-    if ticker_hint and re.match(r"^[A-Z]{2,6}$", ticker_hint.strip().upper()):
-        candidate = ticker_hint.strip().upper()
-        if _verify_ticker_on_google_finance(candidate + ".JK"):
-            logger.info(f"Ticker hint terverifikasi: {candidate}")
-            return candidate  # Return tanpa .JK untuk display
+    # Bersihkan nama: hapus "PT", "Tbk", dll untuk query lebih bersih
+    clean_name = re.sub(r'\b(PT|Tbk|tbk)\b', '', company_name, flags=re.IGNORECASE).strip()
 
-    # ── Fallback: Google Search ──
-    query = f"{company_name} kode saham IDX BEI"
-    url   = f"https://www.google.com/search?q={requests.utils.quote(query)}&hl=id"
+    queries = [
+        f"{clean_name} kode saham IDX BEI",
+        f"{clean_name} stock ticker IDX",
+        f"site:idx.co.id {clean_name}",
+    ]
 
+    for query in queries:
+        url = f"https://www.google.com/search?q={requests.utils.quote(query)}&hl=id"
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+            full_text = soup.get_text(separator=" ")
+
+            patterns = [
+                r"IDX\s*[:\-]\s*([A-Z]{4})\b",
+                r"BEI\s*[:\-]\s*([A-Z]{4})\b",
+                r"kode\s+saham\s*[:\-]?\s*([A-Z]{4})\b",
+                r"ticker\s*[:\-]?\s*([A-Z]{4})\b",
+                r"\b([A-Z]{4})\.JK\b",
+                r"saham\s+([A-Z]{4})\b",
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, full_text, re.IGNORECASE)
+                if match:
+                    found = match.group(1).upper()
+                    # Verifikasi ticker valid di Google Finance
+                    if _verify_ticker(found):
+                        logger.info(f"Ticker ditemukan: {found} untuk {company_name}")
+                        return found
+        except requests.RequestException as e:
+            logger.warning(f"Error Google Search ticker: {e}")
+            continue
+        time.sleep(1)
+
+    logger.warning(f"Ticker tidak ditemukan untuk: {company_name}")
+    return None
+
+
+def _verify_ticker(ticker: str) -> bool:
+    """Verifikasi ticker valid di Google Finance IDX."""
+    url = f"https://www.google.com/finance/quote/{ticker}:IDX"
     try:
         resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-        full_text = soup.get_text(separator=" ")
-
-        patterns = [
-            r"IDX\s*[:\-]\s*([A-Z]{2,6})",
-            r"BEI\s*[:\-]\s*([A-Z]{2,6})",
-            r"kode\s+saham\s*[:\-]?\s*([A-Z]{2,6})",
-            r"ticker\s*[:\-]?\s*([A-Z]{2,6})",
-            r"\b([A-Z]{2,6})\.JK\b",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, full_text, re.IGNORECASE)
-            if match:
-                found = match.group(1).upper()
-                # Hapus .JK jika ada
-                ticker = found.replace(".JK", "")
-                logger.info(f"Ticker ditemukan via Google Search: {ticker}")
-                return ticker
-
-        logger.warning(f"Ticker tidak ditemukan untuk: {company_name}")
-        return None
-
-    except requests.RequestException as e:
-        logger.error(f"Error cari ticker '{company_name}': {e}")
-        return None
-
-
-def _verify_ticker_on_google_finance(ticker: str) -> bool:
-    """Cek apakah ticker valid dengan hit Google Finance."""
-    exchange, symbol = _parse_ticker(ticker)
-    url = f"https://www.google.com/finance/quote/{symbol}:{exchange}"
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
-        return resp.status_code == 200 and "data-last-price" in resp.text
+        return resp.status_code == 200 and (
+            "data-last-price" in resp.text or
+            ticker in resp.text
+        )
     except Exception:
         return False
 
 
-# ── 2. Scrape data live dari Google Finance ───────────────────────────────────
+# ── 2. Scrape harga live dari Google Finance ──────────────────────────────────
 
 def get_market_data(ticker: str) -> dict:
     """
-    Scrape data pasar terkini dari Google Finance.
-
-    Return:
-    {
-      "current_price":      "Rp 860",
-      "market_cap":         "Rp 29,07 T",
-      "shares_outstanding": "33,89 M",
-      "currency":           "IDR",
-      "exchange":           "IDX",
-    }
-    Jika gagal, return dict kosong {}.
+    Scrape data pasar terkini dari Google Finance IDX.
+    Return dict dengan current_price, market_cap, dll.
     """
-    # Pastikan format ticker untuk Google Finance: tambah .JK jika belum ada
-    if not ticker.endswith(".JK") and "." not in ticker:
-        ticker_gf = ticker + ".JK"
-    else:
-        ticker_gf = ticker
+    if not ticker:
+        return {}
 
-    exchange, symbol = _parse_ticker(ticker_gf)
-    url = f"https://www.google.com/finance/quote/{symbol}:{exchange}"
+    url = f"https://www.google.com/finance/quote/{ticker.upper()}:IDX"
 
     for attempt in range(3):
         try:
             resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
             resp.raise_for_status()
-            return _parse_page(resp.text, exchange)
+            return _parse_price_page(resp.text)
         except requests.RequestException as e:
             logger.warning(f"Attempt {attempt+1} gagal ({ticker}): {e}")
             if attempt < 2:
@@ -129,18 +115,18 @@ def get_market_data(ticker: str) -> dict:
     return {}
 
 
-def _parse_page(html: str, exchange: str) -> dict:
+def _parse_price_page(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
 
     # ── Harga ──
     price = ""
     price_tag = soup.find(attrs={"data-last-price": True})
     if price_tag:
-        price = price_tag["data-last-price"]
-
-    # ── Currency ──
-    currency_tag = soup.find(attrs={"data-currency-code": True})
-    currency = currency_tag["data-currency-code"] if currency_tag else _exchange_to_currency(exchange)
+        try:
+            num = float(price_tag["data-last-price"])
+            price = f"Rp {num:,.0f}".replace(",", ".")
+        except Exception:
+            price = price_tag["data-last-price"]
 
     # ── Key stats ──
     stats = {}
@@ -153,7 +139,7 @@ def _parse_page(html: str, exchange: str) -> dict:
         except Exception:
             continue
 
-    # Fallback scrape
+    # Fallback
     if not stats:
         for row in soup.find_all("tr"):
             cells = row.find_all("td")
@@ -163,32 +149,108 @@ def _parse_page(html: str, exchange: str) -> dict:
                 if key:
                     stats[key] = val
 
-    symbol_map = {"IDR": "Rp", "USD": "$", "SGD": "S$", "MYR": "RM"}
-    sym = symbol_map.get(currency, currency)
-
-    def fmt_price(val: str) -> str:
-        if not val:
-            return ""
-        try:
-            # Format harga dengan titik ribuan untuk IDR
-            if currency == "IDR":
-                num = float(val)
-                return f"Rp {num:,.0f}".replace(",", ".")
-            return f"{sym} {val}"
-        except Exception:
-            return f"{sym} {val}"
-
-    mkt_cap = _find_stat(stats, ["market cap", "kapitalisasi", "mkt cap"])
-    shares  = _find_stat(stats, ["shares outstanding", "saham beredar"])
-
     return {
-        "current_price":      fmt_price(price),
-        "currency":           currency,
-        "exchange":           exchange,
-        "market_cap":         mkt_cap,
-        "shares_outstanding": shares,
+        "current_price":      price,
+        "market_cap":         _find_stat(stats, ["market cap", "kapitalisasi", "mkt cap"]),
+        "shares_outstanding": _find_stat(stats, ["shares outstanding", "saham beredar"]),
+        "pe_ratio":           _find_stat(stats, ["p/e ratio", "rasio p/e"]),
+        "52w_high":           _find_stat(stats, ["52-week high", "tertinggi 52"]),
+        "52w_low":            _find_stat(stats, ["52-week low", "terendah 52"]),
     }
 
+
+# ── 3. Cari track record penjamin efek ───────────────────────────────────────
+
+def get_underwriter_track_record(underwriters: list[str]) -> list[dict]:
+    """
+    Cari track record penjamin emisi efek via Google Search.
+
+    Input: list nama penjamin, e.g. ["PT BRI Danareksa Sekuritas", "PT Mirae Asset"]
+    Output: list dict berisi nama, reputasi, jumlah IPO, rating
+    """
+    results = []
+
+    for uw in underwriters[:3]:  # Maksimal 3 penjamin untuk hemat quota
+        clean = re.sub(r'\b(PT|Tbk)\b', '', uw, flags=re.IGNORECASE).strip()
+        query = f"{clean} sekuritas track record IPO BEI reputasi"
+        url   = f"https://www.google.com/search?q={requests.utils.quote(query)}&hl=id"
+
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+            snippet = " ".join(soup.get_text(separator=" ").split()[:500])
+
+            # Cari jumlah IPO yang pernah dijamin
+            ipo_count = None
+            match = re.search(r'(\d+)\s*(?:IPO|emiten|perusahaan)', snippet, re.IGNORECASE)
+            if match:
+                ipo_count = int(match.group(1))
+
+            # Tentukan reputasi berdasarkan nama
+            reputation = _assess_underwriter_reputation(clean)
+
+            results.append({
+                "name":       uw,
+                "reputation": reputation["level"],
+                "desc":       reputation["desc"],
+                "ipo_count":  ipo_count,
+                "snippet":    snippet[:300],
+            })
+
+        except requests.RequestException as e:
+            logger.warning(f"Error cari track record {uw}: {e}")
+            results.append({
+                "name":       uw,
+                "reputation": "Medium",
+                "desc":       "Data track record tidak tersedia",
+                "ipo_count":  None,
+                "snippet":    "",
+            })
+        time.sleep(1)
+
+    return results
+
+
+def _assess_underwriter_reputation(name: str) -> dict:
+    """
+    Nilai reputasi penjamin berdasarkan nama perusahaan.
+    Tier 1: Sekuritas besar milik BUMN atau bank besar
+    Tier 2: Sekuritas menengah
+    Tier 3: Sekuritas kecil/baru
+    """
+    name_upper = name.upper()
+
+    tier1 = [
+        "MANDIRI", "BRI", "BCA", "BNI", "DANAREKSA",
+        "CIMB", "TRIMEGAH", "MIRAE", "INDO PREMIER",
+        "BAHANA", "SUCOR", "SAMUEL"
+    ]
+    tier2 = [
+        "SINARMAS", "PANIN", "MANULIFE", "HENAN",
+        "ERDIKHA", "MNC", "PHINTRACO", "VICTORIA"
+    ]
+
+    for t in tier1:
+        if t in name_upper:
+            return {
+                "level": "Tinggi",
+                "desc": f"Sekuritas Tier 1 dengan reputasi kuat dan berpengalaman dalam puluhan IPO besar di BEI"
+            }
+    for t in tier2:
+        if t in name_upper:
+            return {
+                "level": "Menengah",
+                "desc": f"Sekuritas menengah dengan pengalaman cukup dalam proses IPO di BEI"
+            }
+
+    return {
+        "level": "Perlu Diverifikasi",
+        "desc": "Sekuritas belum banyak dikenal — investor perlu verifikasi track record lebih lanjut"
+    }
+
+
+# ── Helper ────────────────────────────────────────────────────────────────────
 
 def _find_stat(stats: dict, keys: list) -> str:
     for key in keys:
@@ -196,28 +258,3 @@ def _find_stat(stats: dict, keys: list) -> str:
             if key in k:
                 return v
     return ""
-
-
-def _parse_ticker(ticker: str) -> tuple[str, str]:
-    """
-    "SUPA.JK" → ("IDX", "SUPA")
-    "AAPL"    → ("NASDAQ", "AAPL")
-    """
-    suffix_map = {
-        "JK": "IDX", "BK": "SET", "KL": "KLSE",
-        "SI": "SGX", "HK": "HKEX", "T": "TYO",
-    }
-    if "." in ticker:
-        symbol, suffix = ticker.rsplit(".", 1)
-        exchange = suffix_map.get(suffix.upper(), suffix.upper())
-    else:
-        symbol   = ticker.upper()
-        exchange = "NASDAQ"
-    return exchange, symbol.upper()
-
-
-def _exchange_to_currency(exchange: str) -> str:
-    return {
-        "IDX": "IDR", "NASDAQ": "USD", "NYSE": "USD",
-        "SET": "THB", "KLSE": "MYR", "SGX": "SGD",
-    }.get(exchange.upper(), "USD")
