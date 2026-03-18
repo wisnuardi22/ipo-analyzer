@@ -6,8 +6,8 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # Gemini via OpenAI-compatible endpoint
 client = OpenAI(
-    api_key=os.environ.get('GEMINI_API_KEY'),
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+    api_key=os.environ.get('SUMOPOD_API_KEY'),
+    base_url="https://ai.sumopod.com/v1"
 )
 
 def analyze_prospectus(text: str) -> dict:
@@ -223,7 +223,7 @@ OUTPUT JSON (struktur persis ini):
 }}"""
 
     response = client.chat.completions.create(
-        model="gemini-2.0-flash",
+        model="gemini/gemini-2.5-flash",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
         max_tokens=8000
