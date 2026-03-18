@@ -140,12 +140,15 @@ Dari bagian "Penjaminan Emisi Efek" atau "Penjamin Pelaksana Emisi Efek":
 - Jenis penjaminan: "Kesanggupan Penuh" (full commitment) atau lainnya
 
 ============================
-ATURAN OUTPUT
+ATURAN OUTPUT — WAJIB DIPATUHI KETAT
 ============================
-1. Output HANYA JSON murni — tidak ada teks apapun di luar JSON
-2. Tidak ada markdown, tidak ada ```json
-3. String pakai tanda kutip ganda "
-4. Tidak ada trailing comma
+1. Output HANYA JSON murni — TIDAK ADA teks apapun sebelum atau sesudah JSON
+2. DILARANG menggunakan markdown, DILARANG menggunakan ```json atau ```
+3. Semua string WAJIB pakai tanda kutip ganda " bukan tanda kutip tunggal '
+4. DILARANG trailing comma — tidak boleh ada koma sebelum } atau ]
+5. Semua field wajib diisi — jika data tidak ada gunakan null bukan string kosong
+6. JANGAN tambahkan komentar // atau /* */ di dalam JSON
+7. Pastikan semua kurung buka {{ memiliki pasangan kurung tutup }}
 
 PROSPEKTUS:
 {text[:500000]}
@@ -231,7 +234,8 @@ OUTPUT JSON (struktur persis ini):
 
     raw = response.choices[0].message.content.strip()
 
-    # Bersihkan markdown jika ada
+    # ── Bersihkan markdown/formatting ──────────────────────────────────
+    # Hapus ```json ... ``` wrapper
     if "```" in raw:
         parts = raw.split("```")
         for part in parts:
@@ -241,9 +245,42 @@ OUTPUT JSON (struktur persis ini):
             if p.startswith("{"):
                 raw = p
                 break
+
+    # Ambil hanya bagian JSON { ... }
     start = raw.find("{")
-    end = raw.rfind("}") + 1
+    end   = raw.rfind("}") + 1
     if start != -1 and end > start:
         raw = raw[start:end]
 
-    return json.loads(raw)
+    # ── Coba parse langsung ─────────────────────────────────────────────
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # ── Fix 1: Hapus trailing comma sebelum } atau ] ────────────────────
+    import re
+    raw_fixed = re.sub(r',\s*([}\]])', r'\1', raw)
+    try:
+        return json.loads(raw_fixed)
+    except json.JSONDecodeError:
+        pass
+
+    # ── Fix 2: Pakai json5 / ast literal eval sebagai fallback ──────────
+    try:
+        import ast
+        # Ganti true/false/null Python-style
+        raw_py = raw_fixed.replace('true', 'True').replace('false', 'False').replace('null', 'None')
+        return ast.literal_eval(raw_py)
+    except Exception:
+        pass
+
+    # ── Fix 3: Potong sampai JSON valid terakhir ─────────────────────────
+    for i in range(len(raw_fixed), 0, -1):
+        try:
+            return json.loads(raw_fixed[:i])
+        except json.JSONDecodeError:
+            continue
+
+    # ── Fix 4: Return partial data daripada crash ────────────────────────
+    raise ValueError(f"Tidak bisa parse JSON dari Gemini. Raw output (500 char): {raw[:500]}")
