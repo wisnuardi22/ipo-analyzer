@@ -145,10 +145,10 @@ ATURAN OUTPUT — WAJIB DIPATUHI KETAT
 1. Output HANYA JSON murni — TIDAK ADA teks apapun sebelum atau sesudah JSON
 2. DILARANG menggunakan markdown, DILARANG menggunakan ```json atau ```
 3. Semua string WAJIB pakai tanda kutip ganda " bukan tanda kutip tunggal '
-4. DILARANG trailing comma — tidak boleh ada koma sebelum } atau ]
+4. DILARANG trailing comma — tidak boleh ada koma sebelum kurung tutup
 5. Semua field wajib diisi — jika data tidak ada gunakan null bukan string kosong
-6. JANGAN tambahkan komentar // atau /* */ di dalam JSON
-7. Pastikan semua kurung buka {{ memiliki pasangan kurung tutup }}
+6. JANGAN tambahkan komentar di dalam JSON
+7. Pastikan semua kurung buka memiliki pasangan kurung tutup
 
 PROSPEKTUS:
 {text[:500000]}
