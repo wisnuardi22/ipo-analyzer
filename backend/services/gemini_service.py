@@ -1,10 +1,14 @@
-from groq import Groq
+from openai import OpenAI
 import json, os
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-client = Groq(api_key=os.environ.get('GROQ_API_KEY'))
+# Gemini via OpenAI-compatible endpoint
+client = OpenAI(
+    api_key=os.environ.get('GEMINI_API_KEY'),
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+)
 
 def analyze_prospectus(text: str) -> dict:
     prompt = f"""Kamu adalah analis keuangan IPO Indonesia senior (CFA level 3). Baca dokumen prospektus berikut dengan sangat teliti dan ekstrak semua informasi yang diminta.
@@ -112,7 +116,7 @@ ATURAN OUTPUT
 4. Tidak ada trailing comma
 
 PROSPEKTUS:
-{text[:5000]}
+{text[:500000]}
 
 OUTPUT JSON (struktur persis ini):
 {{
@@ -175,10 +179,10 @@ OUTPUT JSON (struktur persis ini):
 }}"""
 
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="gemini-1.5-flash",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
-        max_tokens=4000
+        max_tokens=8000
     )
 
     raw = response.choices[0].message.content.strip()
