@@ -240,7 +240,7 @@ OUTPUT JSON (struktur persis ini):
         model="gemini/gemini-2.5-flash",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
-        max_tokens=8000
+        max_tokens=16000
     )
 
     raw = response.choices[0].message.content.strip()
@@ -294,4 +294,4 @@ OUTPUT JSON (struktur persis ini):
             continue
 
     # ── Fix 4: Return partial data daripada crash ────────────────────────
-    raise ValueError(f"Tidak bisa parse JSON dari Gemini. Raw output (500 char): {raw[:500]}")
+    raise ValueError(f"Tidak bisa parse JSON dari Gemini. Raw output (1000 char): {raw[:1000]}")
