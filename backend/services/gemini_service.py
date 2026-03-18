@@ -25,7 +25,21 @@ LANGKAH 1 — IDENTIFIKASI DOKUMEN
 LANGKAH 2 — DATA IDENTITAS
 ============================
 - Nama perusahaan lengkap (termasuk Tbk)
-- Kode ticker saham: 4 huruf kapital. Cari di: judul halaman, tabel struktur modal, bagian pencatatan BEI, atau frasa "Kode Saham: XXXX"
+
+KODE TICKER SAHAM — SANGAT PENTING, CARI DENGAN TELITI:
+  Kode ticker adalah 4 huruf kapital yang merupakan kode resmi saham di BEI.
+  Cari di lokasi berikut secara berurutan:
+  1. Halaman sampul/judul: biasanya tertulis "Kode Saham: XXXX" atau "Kode Efek: XXXX"
+  2. Tabel "Struktur Kepemilikan Saham Setelah IPO" — kolom paling atas
+  3. Bagian "Pencatatan di Bursa" atau "Rencana Pencatatan Efek"
+  4. Header dokumen atau footer halaman
+  5. Bagian "Informasi Penawaran Umum" — baris Kode Saham/Kode Efek
+  ATURAN TICKER:
+  - HARUS tepat 4 huruf kapital (contoh: BBRI, TLKM, GOTO, CDIA, MGRO)
+  - JANGAN gunakan nama perusahaan sebagai ticker
+  - JANGAN mengarang ticker — jika tidak ditemukan sama sekali, isi null
+  - Ticker berbeda dari nama perusahaan (PT Bank BRI Tbk → ticker: BBRI)
+
 - Sektor industri: tulis spesifik (contoh: "Pertambangan Emas & Mineral", bukan hanya "Pertambangan")
 - Tanggal Pencatatan di BEI
 - Harga penawaran: jika range, ambil NILAI TERTINGGI
@@ -112,32 +126,29 @@ Dari bagian prospek usaha, keunggulan kompetitif, DAN analisis penjamin efek:
   dan desc berisi nama penjamin + track record singkatnya
 
 ============================
+============================
 LANGKAH 9 — PENJAMIN EFEK (UNDERWRITER)
 ============================
-Cari di bagian "Penjaminan Emisi Efek" atau "Agen Penjual":
-- Nama penjamin emisi utama (lead underwriter)
-- Nama penjamin emisi lainnya jika ada
-- Jumlah saham yang dijamin masing-masing
-- Sifat penjaminan: penuh (full commitment) atau terbaik (best effort)
-- Komisi penjaminan jika disebutkan
+Cari di bagian "Penjaminan Emisi Efek", "Penjamin Pelaksana Emisi Efek", atau "Agen Penjual":
 
-ANALISIS TRACK RECORD PENJAMIN:
-Berikan analisis singkat reputasi penjamin berdasarkan pengetahuan umum:
-- Apakah penjamin ini terkenal dan terpercaya di pasar modal Indonesia?
-- Berapa banyak IPO besar yang pernah mereka tangani?
-- Apakah ada catatan negatif yang diketahui?
+EKSTRAK:
+- Nama PENJAMIN PELAKSANA EMISI EFEK (lead underwriter) — perusahaan utama
+- Nama PENJAMIN EMISI EFEK lainnya (co-underwriter) — bisa beberapa
+- Sifat penjaminan: "Kesanggupan Penuh" (full commitment) atau "Kesanggupan Terbaik" (best effort)
+- Porsi/persentase penjaminan masing-masing jika disebutkan
 
-Hasil analisis penjamin efek akan dimasukkan ke:
-- "benefits" jika penjamin memiliki reputasi baik dan track record kuat
-- "risks" jika penjamin kurang dikenal atau ada catatan negatif
+ANALISIS TRACK RECORD:
+Nilai reputasi berdasarkan pengetahuan pasar modal Indonesia:
 
-============================
-LANGKAH 9 — PENJAMIN EMISI EFEK
-============================
-Dari bagian "Penjaminan Emisi Efek" atau "Penjamin Pelaksana Emisi Efek":
-- Ekstrak SEMUA nama penjamin (penjamin pelaksana + co-underwriter)
-- Jumlah porsi penjaminan masing-masing (lembar saham atau persentase)
-- Jenis penjaminan: "Kesanggupan Penuh" (full commitment) atau lainnya
+TIER 1 (Terpercaya): Mandiri Sekuritas, BCA Sekuritas, BRI Danareksa, Mirae Asset, CGS-CIMB, Trimegah, Bahana, UBS, Morgan Stanley, Indo Premier, Samuel Sekuritas
+TIER 2 (Cukup dikenal): Sekuritas menengah yang aktif di pasar modal
+TIER 3 (Perlu diwaspadai): Sekuritas kecil atau tidak dikenal, pernah kena sanksi OJK
+
+ATURAN PENEMPATAN HASIL:
+- Tier 1 + Full Commitment → masuk "benefits": title "Didukung Penjamin Emisi Tier 1"
+- Tier 1 + Best Effort → masuk "benefits" dengan catatan risiko
+- Tier 2/3 → masuk "risks" level Medium
+- Best Effort (apapun tier) → JUGA tambahkan ke "risks" level Low: "Risiko Penjaminan Best Effort"
 
 ============================
 ATURAN OUTPUT — WAJIB DIPATUHI KETAT

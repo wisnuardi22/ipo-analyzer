@@ -109,7 +109,7 @@ const TradingViewMiniChart = forwardRef(({ symbol }, ref) => {
   return <div ref={ref} />;
 });
 
-const API_BASE = "https://ipo-analyzer-production.up.railway.app/api";
+const API_BASE = "http://localhost:8000/api";
 
 // ── TRANSLATIONS ──────────────────────────────────────────────
 const T = {
@@ -724,7 +724,7 @@ export default function App() {
           description: d.summary || MOCK.company.description,
           ipoDate: d.ipo_details?.ipo_date || MOCK.company.ipoDate,
           offerPrice: d.ipo_details?.share_price || MOCK.company.offerPrice,
-          currentPrice: d.ipo_details?.share_price || MOCK.company.currentPrice,
+          currentPrice: d.current_price || d.ipo_details?.current_price || "",
           totalShares: d.ipo_details?.total_shares || MOCK.company.totalShares,
           marketCap:
             d.ipo_details?.market_cap || d.market_cap || MOCK.company.marketCap,
@@ -787,6 +787,10 @@ export default function App() {
           })) || MOCK.useOfProceeds,
         riskFactors: d.risks || MOCK.riskFactors,
         potentialBenefits: d.benefits || MOCK.potentialBenefits,
+        riskLevel: d.risk_level || "MEDIUM",
+        riskLabel: d.risk_label || "Risiko Sedang",
+        riskColor: d.risk_color || "#F59E0B",
+        underwriter: d.underwriter || d.ipo_details?.underwriter || null,
       };
       setData(mapped);
       setReady(true);
@@ -1365,21 +1369,29 @@ export default function App() {
                 </div>
                 <div className="bg-white/5 rounded-xl p-4 border border-white/10">
                   <p className="text-gray-400 text-xs mb-1">{l.dash.cur}</p>
-                  {D.company.ticker ? (
-                    <a
-                      href={`https://www.tradingview.com/chart/?symbol=IDX:${D.company.ticker}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-bold text-sm mt-1"
-                    >
-                      <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse mr-1"></span>
-                      IDX:{D.company.ticker}
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                  {D.company.currentPrice ? (
+                    <div>
+                      <p className="text-xl font-bold text-emerald-400">
+                        {D.company.currentPrice}
+                      </p>
+                      {D.company.ticker && (
+                        <p className="text-gray-500 text-xs mt-1 flex items-center gap-1">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                          IDX:{D.company.ticker}
+                        </p>
+                      )}
+                    </div>
                   ) : (
-                    <p className="text-gray-400 text-sm mt-1">
-                      {lang === "EN" ? "Not yet listed" : "Belum listing"}
-                    </p>
+                    <div>
+                      <p className="text-gray-400 text-sm mt-1">
+                        {lang === "EN" ? "Fetching..." : "Mengambil data..."}
+                      </p>
+                      {D.company.ticker && (
+                        <p className="text-gray-500 text-xs mt-1">
+                          IDX:{D.company.ticker}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div className="bg-white/5 rounded-xl p-4 border border-white/10">
@@ -1538,7 +1550,6 @@ export default function App() {
                     title: l.dash.rev,
                     data: D.financialTrends.revenue,
                     color: "#10B981",
-                    type: "bar",
                     trendKey: "revenue",
                     note:
                       lang === "EN"
@@ -1549,7 +1560,6 @@ export default function App() {
                     title: l.dash.gm,
                     data: D.financialTrends.grossMargin,
                     color: "#3B82F6",
-                    type: "line",
                     trendKey: "grossMargin",
                     note:
                       lang === "EN"
@@ -1560,7 +1570,6 @@ export default function App() {
                     title: l.dash.om,
                     data: D.financialTrends.operatingMargin,
                     color: "#F59E0B",
-                    type: "line",
                     trendKey: "operatingMargin",
                     note:
                       lang === "EN"
@@ -1571,7 +1580,6 @@ export default function App() {
                     title: l.dash.eb,
                     data: D.financialTrends.ebitdaMargin,
                     color: "#8B5CF6",
-                    type: "line",
                     trendKey: "ebitdaMargin",
                     note:
                       lang === "EN"
@@ -1591,6 +1599,9 @@ export default function App() {
                         valid.reduce((s, x) => s + x.value, 0) / valid.length
                       ).toFixed(1)
                     : null;
+                  // ── Dinamis: 1 tahun → bar chart, >1 tahun → line chart ──
+                  const chartType =
+                    (ch.data?.length || 0) <= 1 ? "bar" : "line";
                   return (
                     <div
                       key={i}
@@ -1643,7 +1654,7 @@ export default function App() {
                         </p>
                       )}
                       <ResponsiveContainer width="100%" height={200}>
-                        {ch.type === "bar" ? (
+                        {chartType === "bar" ? (
                           <BarChart data={ch.data}>
                             <CartesianGrid
                               strokeDasharray="3 3"
@@ -1805,19 +1816,57 @@ export default function App() {
                 <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
                   {l.dash.risk}
                 </h3>
-                <div className="flex gap-4 mb-5">
-                  <span className="text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 px-2 py-1 rounded-full font-semibold">
-                    {D.riskFactors.filter((r) => r.level === "High").length}{" "}
-                    High
-                  </span>
-                  <span className="text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 px-2 py-1 rounded-full font-semibold">
-                    {D.riskFactors.filter((r) => r.level === "Medium").length}{" "}
-                    Medium
-                  </span>
-                  <span className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-1 rounded-full font-semibold">
-                    {D.riskFactors.filter((r) => r.level === "Low").length} Low
+
+                {/* ── Overall Risk Badge — SATU LEVEL SAJA ── */}
+                <div className="flex items-center gap-3 mb-5">
+                  <div
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-full font-bold text-white text-sm shadow-lg"
+                    style={{ backgroundColor: D.riskColor || "#F59E0B" }}
+                  >
+                    <span>
+                      {D.riskLevel === "HIGH"
+                        ? "🔴"
+                        : D.riskLevel === "LOW"
+                          ? "🟢"
+                          : "🟡"}
+                    </span>
+                    <span>{D.riskLabel || "Risiko Sedang"}</span>
+                  </div>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {D.riskFactors.length}{" "}
+                    {lang === "EN"
+                      ? "risk factors identified"
+                      : "faktor risiko teridentifikasi"}
                   </span>
                 </div>
+
+                {/* ── Underwriter Info jika ada ── */}
+                {D.underwriter && D.underwriter.lead && (
+                  <div className="mb-5 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-3">
+                    <p className="text-xs font-semibold text-blue-700 dark:text-blue-300 mb-1 flex items-center gap-1">
+                      🏦 {lang === "EN" ? "Underwriter" : "Penjamin Emisi Efek"}
+                    </p>
+                    <p className="text-sm font-bold text-gray-800 dark:text-gray-200">
+                      {D.underwriter.lead}
+                      {D.underwriter.others?.length > 0 && (
+                        <span className="font-normal text-gray-500 text-xs ml-2">
+                          + {D.underwriter.others.join(", ")}
+                        </span>
+                      )}
+                    </p>
+                    {D.underwriter.type && (
+                      <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                        {D.underwriter.type}
+                      </p>
+                    )}
+                    {D.underwriter.reputation && (
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">
+                        {D.underwriter.reputation}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <div className="space-y-5">
                   {/* Risk Factors */}
                   <div>
