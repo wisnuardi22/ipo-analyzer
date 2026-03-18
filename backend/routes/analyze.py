@@ -17,16 +17,52 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Data tidak ditemukan")
 
     try:
-        # 1. Analisis prospektus via Groq
+        # ── 1. Analisis prospektus via Gemini ────────────────────────────
         result = analyze_prospectus(analysis.raw_text)
 
         analysis.company_name   = result.get("company_name", analysis.company_name)
         analysis.summary        = result.get("summary", "")
-        analysis.risks          = json.dumps(result.get("risks", []))
-        analysis.benefits       = json.dumps(result.get("benefits", []))
         analysis.financial_data = json.dumps(result.get("financial", {}))
 
-        # 2. Verifikasi ticker via Google Search
+        # ── 2. Proses risks & benefits + tambahkan analisis penjamin ─────
+        risks       = result.get("risks", [])
+        benefits    = result.get("benefits", [])
+        underwriter = result.get("underwriter", {})
+
+        if underwriter:
+            reputation = underwriter.get("reputation", "")
+            lead       = underwriter.get("lead", "")
+            uw_type    = underwriter.get("type", "")
+            others     = underwriter.get("others", [])
+            others_str = ", ".join(others) if others else ""
+
+            rep_lower = reputation.lower()
+            is_good   = any(w in rep_lower for w in [
+                "baik", "besar", "terpercaya", "terkemuka",
+                "terbesar", "sangat", "ternama", "top"
+            ])
+
+            if is_good:
+                desc = f"IPO ini dijamin oleh {lead}"
+                if others_str:
+                    desc += f" bersama {others_str}"
+                desc += f" ({uw_type}). {reputation}"
+                benefits.append({
+                    "title": "Didukung Penjamin Emisi Terpercaya",
+                    "desc":  desc
+                })
+            else:
+                desc = f"Penjamin emisi {lead} memiliki reputasi yang perlu diperhatikan. {reputation}"
+                risks.append({
+                    "level": "Medium",
+                    "title": "Risiko Reputasi Penjamin Emisi",
+                    "desc":  desc
+                })
+
+        analysis.risks    = json.dumps(risks)
+        analysis.benefits = json.dumps(benefits)
+
+        # ── 3. Verifikasi ticker via Google Search ────────────────────────
         ticker_from_prospectus = result.get("ticker", "")
         company_name           = result.get("company_name", analysis.company_name)
 
@@ -36,7 +72,7 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
             logger.warning(f"Gagal verifikasi ticker: {e}")
             ticker = ticker_from_prospectus
 
-        # 3. Ambil data live dari Google Finance
+        # ── 4. Ambil harga live dari Google Finance ───────────────────────
         market = {}
         if ticker:
             try:
@@ -44,7 +80,7 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
             except Exception as e:
                 logger.warning(f"Gagal ambil market data: {e}")
 
-        # 4. Simpan ipo_details
+        # ── 5. Simpan ipo_details ─────────────────────────────────────────
         analysis.ipo_details = json.dumps({
             "ticker":             ticker or ticker_from_prospectus,
             "sector":             result.get("sector", ""),
@@ -56,6 +92,7 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
             "shares_outstanding": market.get("shares_outstanding", ""),
             "use_of_funds":       result.get("use_of_funds", []),
             "kpi":                result.get("kpi", {}),
+            "underwriter":        underwriter,
         })
 
         db.commit()
@@ -101,6 +138,7 @@ def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
         "financial":          financial,
         "use_of_funds":       ipo.get("use_of_funds", []),
         "kpi":                ipo.get("kpi", {}),
+        "underwriter":        ipo.get("underwriter", {}),
         "risk_level":         risk_level,
         "risk_label":         risk_label,
         "risk_color":         risk_color,

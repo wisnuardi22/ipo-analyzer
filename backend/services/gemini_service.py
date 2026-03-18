@@ -91,21 +91,53 @@ Baca bagian "Rencana Penggunaan Dana" dengan SANGAT TELITI.
 - description: jelaskan secara spesifik uang tersebut untuk apa (beli apa, bangun apa, bayar apa)
 
 ============================
-LANGKAH 7 — RISIKO (5-7 item)
+LANGKAH 7 — RISIKO (5-8 item)
 ============================
-Dari bagian "Faktor Risiko". Aturan baru:
+Dari bagian "Faktor Risiko" + analisis penjamin efek. Aturan:
 - Setiap risiko hanya boleh SATU level: High, Medium, atau Low
 - High: Risiko yang bisa mengancam kelangsungan bisnis atau revenue utama
 - Medium: Risiko operasional yang perlu dikelola tapi tidak mengancam eksistensi
 - Low: Risiko umum yang dialami semua perusahaan di sektor ini
 - desc: jelaskan dengan bahasa sederhana MENGAPA level ini dipilih
+- Jika penjamin efek kurang dikenal/reputasi buruk: tambahkan sebagai risiko Medium/High
 
 ============================
-LANGKAH 8 — KEUNGGULAN / BENEFIT (4-6 item)
+LANGKAH 8 — KEUNGGULAN / BENEFIT (4-7 item)
 ============================
-Dari bagian prospek usaha dan keunggulan kompetitif:
+Dari bagian prospek usaha, keunggulan kompetitif, DAN analisis penjamin efek:
 - Tulis manfaat nyata bagi investor, bukan sekadar pujian perusahaan
 - Sertakan angka/data konkret jika tersedia
+- Jika penjamin efek bereputasi baik (mis: Mandiri Sekuritas, BCA Sekuritas, CGS-CIMB, UBS, dll):
+  tambahkan sebagai benefit dengan title "Didukung Penjamin Emisi Terpercaya"
+  dan desc berisi nama penjamin + track record singkatnya
+
+============================
+LANGKAH 9 — PENJAMIN EFEK (UNDERWRITER)
+============================
+Cari di bagian "Penjaminan Emisi Efek" atau "Agen Penjual":
+- Nama penjamin emisi utama (lead underwriter)
+- Nama penjamin emisi lainnya jika ada
+- Jumlah saham yang dijamin masing-masing
+- Sifat penjaminan: penuh (full commitment) atau terbaik (best effort)
+- Komisi penjaminan jika disebutkan
+
+ANALISIS TRACK RECORD PENJAMIN:
+Berikan analisis singkat reputasi penjamin berdasarkan pengetahuan umum:
+- Apakah penjamin ini terkenal dan terpercaya di pasar modal Indonesia?
+- Berapa banyak IPO besar yang pernah mereka tangani?
+- Apakah ada catatan negatif yang diketahui?
+
+Hasil analisis penjamin efek akan dimasukkan ke:
+- "benefits" jika penjamin memiliki reputasi baik dan track record kuat
+- "risks" jika penjamin kurang dikenal atau ada catatan negatif
+
+============================
+LANGKAH 9 — PENJAMIN EMISI EFEK
+============================
+Dari bagian "Penjaminan Emisi Efek" atau "Penjamin Pelaksana Emisi Efek":
+- Ekstrak SEMUA nama penjamin (penjamin pelaksana + co-underwriter)
+- Jumlah porsi penjaminan masing-masing (lembar saham atau persentase)
+- Jenis penjaminan: "Kesanggupan Penuh" (full commitment) atau lainnya
 
 ============================
 ATURAN OUTPUT
@@ -122,6 +154,12 @@ OUTPUT JSON (struktur persis ini):
 {{
   "company_name": "PT Merdeka Gold Resources Tbk",
   "ticker": "MGRO",
+  "underwriter": {{
+    "lead": "Mandiri Sekuritas",
+    "others": ["BCA Sekuritas", "CGS-CIMB Sekuritas"],
+    "type": "Penjaminan Penuh (Full Commitment)",
+    "reputation": "Sangat baik — Mandiri Sekuritas adalah penjamin emisi terbesar di Indonesia dengan 50+ IPO besar"
+  }},
   "sector": "Pertambangan Emas & Mineral",
   "ipo_date": "23 September 2025",
   "share_price": "Rp 2.880",
@@ -170,16 +208,22 @@ OUTPUT JSON (struktur persis ini):
     {{"level": "Medium", "title": "Risiko Regulasi Pertambangan", "desc": "Perubahan peraturan ESDM atau pencabutan izin konsesi tambang dapat menghambat operasional meski risiko ini moderat karena izin sudah dipegang lama"}},
     {{"level": "Low", "title": "Risiko Likuiditas Saham", "desc": "Sebagai emiten baru, volume perdagangan awal mungkin rendah, namun hal ini wajar dan umumnya membaik seiring waktu"}}
   ],
+  "underwriter_risk": "Tidak ada — penjamin emisi memiliki reputasi baik",
   "benefits": [
     {{"title": "Cadangan Emas Terbukti yang Besar", "desc": "Perusahaan memiliki cadangan emas terbukti sebesar 1,2 juta oz, cukup untuk operasi 10+ tahun ke depan tanpa eksplorasi tambahan"}},
     {{"title": "Harga Emas Sedang di Level Tertinggi Sepanjang Masa", "desc": "Emas diperdagangkan di atas USD 2.000/oz, memberikan margin keuntungan yang sangat tebal bagi produsen emas berbiaya rendah"}},
     {{"title": "Cash Cost Kompetitif", "desc": "Biaya produksi USD 850/oz jauh di bawah harga pasar, memberikan buffer keuntungan yang kuat meski harga emas turun"}},
-    {{"title": "Manajemen Berpengalaman di Sektor Tambang", "desc": "Tim manajemen rata-rata 15+ tahun pengalaman di industri pertambangan, dengan track record operasi tambang yang efisien"}}
+    {{"title": "Manajemen Berpengalaman di Sektor Tambang", "desc": "Tim manajemen rata-rata 15+ tahun pengalaman di industri pertambangan, dengan track record operasi tambang yang efisien"}},
+    {{"title": "Didukung Penjamin Emisi Terpercaya", "desc": "IPO ini dijamin penuh oleh Mandiri Sekuritas — penjamin emisi terbesar Indonesia yang telah menangani 50+ IPO besar seperti BREN, GOTO, TLKM rights issue. Full commitment berarti seluruh saham pasti terjual"}}
+  ],
+  "underwriters": [
+    {{"name": "PT Mandiri Sekuritas", "role": "Penjamin Pelaksana Emisi Efek", "portion_pct": 70, "commitment_type": "Kesanggupan Penuh"}},
+    {{"name": "PT BRI Danareksa Sekuritas", "role": "Penjamin Emisi Efek", "portion_pct": 30, "commitment_type": "Kesanggupan Penuh"}}
   ]
 }}"""
 
     response = client.chat.completions.create(
-        model="gemini-1.5-flash",
+        model="gemini-2.0-flash",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
         max_tokens=8000
