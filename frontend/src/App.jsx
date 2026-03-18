@@ -109,7 +109,7 @@ const TradingViewMiniChart = forwardRef(({ symbol }, ref) => {
   return <div ref={ref} />;
 });
 
-const API_BASE = "https://ipo-analyzer-production.up.railway.app/api";
+const API_BASE = "http://localhost:8000/api";
 
 // ── TRANSLATIONS ──────────────────────────────────────────────
 const T = {
@@ -537,6 +537,28 @@ const MOCK = {
   },
 };
 
+// ── Risk level helpers (sama logika dengan backend) ──────────────────────────
+const _computeRiskLevel = (risks) => {
+  const p = { high: 3, medium: 2, low: 1 };
+  const max = risks.reduce(
+    (m, r) => Math.max(m, p[String(r.level || "").toLowerCase()] || 0),
+    0,
+  );
+  return max >= 3 ? "HIGH" : max === 2 ? "MEDIUM" : "LOW";
+};
+const _computeRiskLabel = (risks) => {
+  const lvl = _computeRiskLevel(risks);
+  return lvl === "HIGH"
+    ? "Risiko Tinggi"
+    : lvl === "LOW"
+      ? "Risiko Rendah"
+      : "Risiko Sedang";
+};
+const _computeRiskColor = (risks) => {
+  const lvl = _computeRiskLevel(risks);
+  return lvl === "HIGH" ? "#EF4444" : lvl === "LOW" ? "#22C55E" : "#F59E0B";
+};
+
 export default function App() {
   const [lang, setLang] = useState("EN");
   const [dark, setDark] = useState(false);
@@ -787,9 +809,9 @@ export default function App() {
           })) || MOCK.useOfProceeds,
         riskFactors: d.risks || MOCK.riskFactors,
         potentialBenefits: d.benefits || MOCK.potentialBenefits,
-        riskLevel: d.risk_level || "MEDIUM",
-        riskLabel: d.risk_label || "Risiko Sedang",
-        riskColor: d.risk_color || "#F59E0B",
+        riskLevel: d.risk_level || _computeRiskLevel(d.risks || []),
+        riskLabel: d.risk_label || _computeRiskLabel(d.risks || []),
+        riskColor: d.risk_color || _computeRiskColor(d.risks || []),
         underwriter: d.underwriter || d.ipo_details?.underwriter || null,
       };
       setData(mapped);
