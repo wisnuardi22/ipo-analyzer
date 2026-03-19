@@ -24,8 +24,24 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
         analysis.summary        = result.get("summary", "")
         analysis.financial_data = json.dumps(result.get("financial", {}))
 
-        # ── 2. Proses risks & benefits + tambahkan analisis penjamin ─────
-        risks       = result.get("risks", [])
+        # ── 2. Ambil overall risk level dari Gemini ───────────────────────
+        overall_risk_level  = result.get("overall_risk_level", "").upper()  # HIGH/MEDIUM/LOW
+        overall_risk_reason = result.get("overall_risk_reason", "")
+
+        # Normalisasi
+        if overall_risk_level not in ["HIGH", "MEDIUM", "LOW"]:
+            overall_risk_level = "MEDIUM"
+
+        # ── 3. Filter risks — hanya tampilkan yang sesuai overall level ───
+        all_risks = result.get("risks", [])
+        # Risks dari Gemini sudah difilter sesuai level, tapi kita pastikan lagi
+        level_map = {"HIGH": "High", "MEDIUM": "Medium", "LOW": "Low"}
+        target_level = level_map.get(overall_risk_level, "Medium")
+        risks = [r for r in all_risks if str(r.get("level","")).strip().capitalize() == target_level]
+        # Jika filter kosong, pakai semua risks dari Gemini
+        if not risks:
+            risks = all_risks
+
         benefits    = result.get("benefits", [])
         underwriter = result.get("underwriter", {})
 
@@ -82,17 +98,19 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
 
         # ── 5. Simpan ipo_details ─────────────────────────────────────────
         analysis.ipo_details = json.dumps({
-            "ticker":             ticker or ticker_from_prospectus,
-            "sector":             result.get("sector", ""),
-            "ipo_date":           result.get("ipo_date", ""),
-            "share_price":        result.get("share_price", ""),
-            "total_shares":       result.get("total_shares", ""),
-            "market_cap":         market.get("market_cap") or result.get("market_cap", ""),
-            "current_price":      market.get("current_price", ""),
-            "shares_outstanding": market.get("shares_outstanding", ""),
-            "use_of_funds":       result.get("use_of_funds", []),
-            "kpi":                result.get("kpi", {}),
-            "underwriter":        underwriter,
+            "ticker":               ticker or ticker_from_prospectus,
+            "sector":               result.get("sector", ""),
+            "ipo_date":             result.get("ipo_date", ""),
+            "share_price":          result.get("share_price", ""),
+            "total_shares":         result.get("total_shares", ""),
+            "market_cap":           market.get("market_cap") or result.get("market_cap", ""),
+            "current_price":        market.get("current_price", ""),
+            "shares_outstanding":   market.get("shares_outstanding", ""),
+            "use_of_funds":         result.get("use_of_funds", []),
+            "kpi":                  result.get("kpi", {}),
+            "underwriter":          underwriter,
+            "overall_risk_level":   overall_risk_level,
+            "overall_risk_reason":  overall_risk_reason,
         })
 
         db.commit()
@@ -120,31 +138,41 @@ def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
     risks     = json.loads(analysis.risks)          if analysis.risks          else []
     benefits  = json.loads(analysis.benefits)       if analysis.benefits       else []
 
-    risk_level, risk_label, risk_color = _resolve_overall_risk(risks)
+    # Ambil overall risk dari Gemini (lebih akurat) atau hitung dari risks
+    stored_level  = ipo.get("overall_risk_level", "")
+    stored_reason = ipo.get("overall_risk_reason", "")
+
+    if stored_level in ["HIGH", "MEDIUM", "LOW"]:
+        risk_level = stored_level
+        risk_label = {"HIGH": "Risiko Tinggi", "MEDIUM": "Risiko Sedang", "LOW": "Risiko Rendah"}[stored_level]
+        risk_color = {"HIGH": "#EF4444", "MEDIUM": "#F59E0B", "LOW": "#22C55E"}[stored_level]
+    else:
+        risk_level, risk_label, risk_color = _resolve_overall_risk(risks)
 
     return {
-        "id":                 analysis.id,
-        "company_name":       analysis.company_name,
-        "created_at":         str(analysis.created_at),
-        "ticker":             ipo.get("ticker", ""),
-        "sector":             ipo.get("sector", ""),
-        "ipo_date":           ipo.get("ipo_date", ""),
-        "share_price":        ipo.get("share_price", ""),
-        "current_price":      ipo.get("current_price", ""),
-        "total_shares":       ipo.get("total_shares", ""),
-        "shares_outstanding": ipo.get("shares_outstanding", ""),
-        "market_cap":         ipo.get("market_cap", ""),
-        "summary":            analysis.summary,
-        "financial":          financial,
-        "use_of_funds":       ipo.get("use_of_funds", []),
-        "kpi":                ipo.get("kpi", {}),
-        "underwriter":        ipo.get("underwriter", {}),
-        "risk_level":         risk_level,
-        "risk_label":         risk_label,
-        "risk_color":         risk_color,
-        "risks":              risks,
-        "benefits":           benefits,
-        "ipo_details":        ipo,
+        "id":                   analysis.id,
+        "company_name":         analysis.company_name,
+        "created_at":           str(analysis.created_at),
+        "ticker":               ipo.get("ticker", ""),
+        "sector":               ipo.get("sector", ""),
+        "ipo_date":             ipo.get("ipo_date", ""),
+        "share_price":          ipo.get("share_price", ""),
+        "current_price":        ipo.get("current_price", ""),
+        "total_shares":         ipo.get("total_shares", ""),
+        "shares_outstanding":   ipo.get("shares_outstanding", ""),
+        "market_cap":           ipo.get("market_cap", ""),
+        "summary":              analysis.summary,
+        "financial":            financial,
+        "use_of_funds":         ipo.get("use_of_funds", []),
+        "kpi":                  ipo.get("kpi", {}),
+        "underwriter":          ipo.get("underwriter", {}),
+        "risk_level":           risk_level,
+        "risk_label":           risk_label,
+        "risk_color":           risk_color,
+        "risk_reason":          stored_reason,
+        "risks":                risks,
+        "benefits":             benefits,
+        "ipo_details":          ipo,
     }
 
 

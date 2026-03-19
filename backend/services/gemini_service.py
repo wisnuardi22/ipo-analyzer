@@ -35,10 +35,13 @@ KODE TICKER SAHAM — SANGAT PENTING, CARI DENGAN TELITI:
   4. Header dokumen atau footer halaman
   5. Bagian "Informasi Penawaran Umum" — baris Kode Saham/Kode Efek
   ATURAN TICKER:
-  - HARUS tepat 4 huruf kapital (contoh: BBRI, TLKM, GOTO, CDIA, MGRO)
+  - Kode saham IDX terdiri dari 2-6 huruf kapital (umumnya 4 huruf, tapi tidak selalu)
+  - Contoh 4 huruf: BBRI, TLKM, GOTO, CDIA, MGRO, BREN, PTBA, ANTM
+  - Contoh lain: bisa 2, 3, 5, atau 6 huruf tergantung perusahaan
   - JANGAN gunakan nama perusahaan sebagai ticker
   - JANGAN mengarang ticker — jika tidak ditemukan sama sekali, isi null
   - Ticker berbeda dari nama perusahaan (PT Bank BRI Tbk → ticker: BBRI)
+  - Cari di SELURUH dokumen sebelum menyerah
 
 - Sektor industri: tulis spesifik (contoh: "Pertambangan Emas & Mineral", bukan hanya "Pertambangan")
 - Tanggal Pencatatan di BEI
@@ -105,15 +108,24 @@ Baca bagian "Rencana Penggunaan Dana" dengan SANGAT TELITI.
 - description: jelaskan secara spesifik uang tersebut untuk apa (beli apa, bangun apa, bayar apa)
 
 ============================
-LANGKAH 7 — RISIKO (5-8 item)
+LANGKAH 7 — ANALISIS RISIKO
 ============================
-Dari bagian "Faktor Risiko" + analisis penjamin efek. Aturan:
-- Setiap risiko hanya boleh SATU level: High, Medium, atau Low
-- High: Risiko yang bisa mengancam kelangsungan bisnis atau revenue utama
-- Medium: Risiko operasional yang perlu dikelola tapi tidak mengancam eksistensi
-- Low: Risiko umum yang dialami semua perusahaan di sektor ini
-- desc: jelaskan dengan bahasa sederhana MENGAPA level ini dipilih
-- Jika penjamin efek kurang dikenal/reputasi buruk: tambahkan sebagai risiko Medium/High
+Baca bagian "Faktor Risiko" dari prospektus dengan teliti.
+
+LANGKAH A — Tentukan SATU level risiko keseluruhan perusahaan ini:
+- "High"   → jika ada risiko yang bisa mengancam kelangsungan bisnis atau revenue utama
+- "Medium" → jika risiko masih bisa dikelola, tidak mengancam eksistensi perusahaan
+- "Low"    → jika semua risiko bersifat umum dan wajar untuk industri ini
+
+Tulis level ini di field "overall_risk_level" (hanya "High", "Medium", atau "Low")
+Tulis alasan singkat di field "overall_risk_reason" (1-2 kalimat)
+
+LANGKAH B — List faktor risiko SESUAI level yang dipilih (3-5 item):
+- Jika overall = "High"   → tampilkan hanya risiko yang level High
+- Jika overall = "Medium" → tampilkan hanya risiko yang level Medium
+- Jika overall = "Low"    → tampilkan hanya risiko yang level Low
+- Setiap item: title (nama risiko) + desc (penjelasan singkat bahasa awam)
+- JANGAN campurkan level berbeda dalam list risks
 
 ============================
 LANGKAH 8 — KEUNGGULAN / BENEFIT (4-7 item)
@@ -215,14 +227,13 @@ OUTPUT JSON (struktur persis ini):
     {{"category": "Eksplorasi Cadangan Baru", "description": "Biaya eksplorasi dan pengeboran di blok-blok potensial yang sudah diidentifikasi untuk menambah cadangan terbukti perusahaan", "allocation": 30}},
     {{"category": "Modal Kerja", "description": "Pembiayaan operasional sehari-hari termasuk pembelian bahan kimia, bahan bakar, dan gaji karyawan tambang", "allocation": 10}}
   ],
+  "overall_risk_level": "High",
+  "overall_risk_reason": "Perusahaan sangat bergantung pada harga emas global yang volatile dan cadangan tambang terbatas, sehingga kelangsungan bisnis jangka panjang terancam jika harga emas turun tajam.",
   "risks": [
     {{"level": "High", "title": "Risiko Fluktuasi Harga Emas", "desc": "Pendapatan perusahaan 100% bergantung pada harga emas global yang sangat volatile. Penurunan harga emas 20% bisa langsung memotong setengah laba bersih perusahaan"}},
     {{"level": "High", "title": "Risiko Cadangan Tambang Terbatas", "desc": "Jika eksplorasi gagal menemukan cadangan baru, umur tambang yang ada hanya tersisa 8-10 tahun sehingga pendapatan jangka panjang terancam"}},
-    {{"level": "Medium", "title": "Risiko Operasional Pertambangan", "desc": "Kecelakaan kerja, kerusakan alat berat, atau bencana alam dapat menghentikan produksi dan menyebabkan kerugian signifikan"}},
-    {{"level": "Medium", "title": "Risiko Regulasi Pertambangan", "desc": "Perubahan peraturan ESDM atau pencabutan izin konsesi tambang dapat menghambat operasional meski risiko ini moderat karena izin sudah dipegang lama"}},
-    {{"level": "Low", "title": "Risiko Likuiditas Saham", "desc": "Sebagai emiten baru, volume perdagangan awal mungkin rendah, namun hal ini wajar dan umumnya membaik seiring waktu"}}
+    {{"level": "High", "title": "Risiko Perizinan Tambang", "desc": "Pencabutan atau tidak diperpanjangnya izin konsesi tambang dapat menghentikan seluruh operasional perusahaan secara tiba-tiba"}}
   ],
-  "underwriter_risk": "Tidak ada — penjamin emisi memiliki reputasi baik",
   "benefits": [
     {{"title": "Cadangan Emas Terbukti yang Besar", "desc": "Perusahaan memiliki cadangan emas terbukti sebesar 1,2 juta oz, cukup untuk operasi 10+ tahun ke depan tanpa eksplorasi tambahan"}},
     {{"title": "Harga Emas Sedang di Level Tertinggi Sepanjang Masa", "desc": "Emas diperdagangkan di atas USD 2.000/oz, memberikan margin keuntungan yang sangat tebal bagi produsen emas berbiaya rendah"}},

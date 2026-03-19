@@ -109,7 +109,7 @@ const TradingViewMiniChart = forwardRef(({ symbol }, ref) => {
   return <div ref={ref} />;
 });
 
-const API_BASE = "https://ipo-analyzer-production.up.railway.app/api";
+const API_BASE = "http://localhost:8000/api";
 
 // ── TRANSLATIONS ──────────────────────────────────────────────
 const T = {
@@ -812,6 +812,7 @@ export default function App() {
         riskLevel: d.risk_level || _computeRiskLevel(d.risks || []),
         riskLabel: d.risk_label || _computeRiskLabel(d.risks || []),
         riskColor: d.risk_color || _computeRiskColor(d.risks || []),
+        riskReason: d.risk_reason || "",
         underwriter: d.underwriter || d.ipo_details?.underwriter || null,
       };
       setData(mapped);
@@ -1840,26 +1841,31 @@ export default function App() {
                 </h3>
 
                 {/* ── Overall Risk Badge — SATU LEVEL SAJA ── */}
-                <div className="flex items-center gap-3 mb-5">
-                  <div
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-full font-bold text-white text-sm shadow-lg"
-                    style={{ backgroundColor: D.riskColor || "#F59E0B" }}
-                  >
-                    <span>
-                      {D.riskLevel === "HIGH"
-                        ? "🔴"
-                        : D.riskLevel === "LOW"
-                          ? "🟢"
-                          : "🟡"}
+                <div className="mb-5">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-full font-bold text-white text-sm shadow-lg"
+                      style={{ backgroundColor: D.riskColor || "#F59E0B" }}
+                    >
+                      <span>
+                        {D.riskLevel === "HIGH"
+                          ? "🔴"
+                          : D.riskLevel === "LOW"
+                            ? "🟢"
+                            : "🟡"}
+                      </span>
+                      <span>{D.riskLabel || "Risiko Sedang"}</span>
+                    </div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {D.riskFactors.length}{" "}
+                      {lang === "EN" ? "risk factors" : "faktor risiko"}
                     </span>
-                    <span>{D.riskLabel || "Risiko Sedang"}</span>
                   </div>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {D.riskFactors.length}{" "}
-                    {lang === "EN"
-                      ? "risk factors identified"
-                      : "faktor risiko teridentifikasi"}
-                  </span>
+                  {D.riskReason && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400 italic leading-relaxed">
+                      {D.riskReason}
+                    </p>
+                  )}
                 </div>
 
                 {/* ── Underwriter Info jika ada ── */}
