@@ -45,18 +45,25 @@ Paragraf 3 — Tujuan IPO: Dana dipakai untuk apa, target ke depan, visi pertumb
 Pisahkan paragraf dengan \\n\\n. WAJIB spesifik dengan data angka dari prospektus.
 
 ===================================================
-BAGIAN 3: DATA KEUANGAN — HARUS DARI TABEL DI PROSPEKTUS
+BAGIAN 3: DATA KEUANGAN — WAJIB AMBIL DARI TABEL ASLI
 ===================================================
-Cari tabel: "Ikhtisar Data Keuangan Penting", "Laporan Laba Rugi Konsolidasian", "Ringkasan Keuangan"
+LANGKAH WAJIB:
+1. Cari tabel dengan judul: "Ikhtisar Data Keuangan Penting", "Laporan Laba Rugi Konsolidasian", "Ringkasan Laporan Keuangan"
+2. Catat SEMUA tahun yang ada di tabel (bisa 1-4 tahun)
+3. Catat nilai AKTUAL dari tabel: Total Pendapatan/Revenue, Laba Kotor, Laba Usaha, Laba Bersih
+4. Hitung setiap metrik dari angka yang sudah kamu catat
 
-PENTING: Data keuangan ini WAJIB berbeda antar perusahaan. Baca dan hitung dari angka aktual di tabel.
+PERINGATAN KERAS:
+- DILARANG menggunakan angka yang sama untuk perusahaan berbeda
+- DILARANG mengarang angka — jika tidak ada di tabel, isi null
+- HARUS berbeda untuk setiap perusahaan yang dianalisis
+- Jika hanya 1 tahun data: revenue_growth = 0, sisanya hitung dari angka 1 tahun itu
 
-Tahun yang tersedia: bisa 1, 2, 3, atau 4 tahun — gunakan SEMUA yang ada di dokumen.
-Mata uang: IDR atau USD — tulis apa adanya di field "currency".
+Mata uang: IDR atau USD — tulis apa adanya di "currency"
 
-CARA HITUNG (gunakan angka dari tabel, HARUS berbeda tiap perusahaan):
-PENTING: Jika hanya ada 1 tahun data → revenue_growth = 0 untuk tahun itu, isi null untuk D&A jika tidak ada.
-PENTING: Jika data tidak ada sama sekali → isi null, JANGAN buat angka fiktif.
+CARA HITUNG dari angka AKTUAL di tabel:
+PENTING: Jika hanya ada 1 tahun data → revenue_growth = 0 untuk tahun itu
+PENTING: Jika data tidak ada → isi null, JANGAN buat angka fiktif
 A) Revenue Growth (%) = ((Pendapatan_N - Pendapatan_N-1) / |Pendapatan_N-1|) × 100
    → Tahun pertama yang tersedia = 0 (tidak ada pembanding)
    → Contoh: Rev 2023=500M, Rev 2024=750M → Growth 2024 = ((750-500)/500)×100 = 50.0
@@ -244,7 +251,7 @@ OUTPUT JSON:
     response = client.chat.completions.create(
         model="gemini/gemini-2.5-flash",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,
+        temperature=0.05,
         max_tokens=16000
     )
 

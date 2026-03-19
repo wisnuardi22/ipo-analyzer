@@ -537,7 +537,55 @@ const MOCK = {
   },
 };
 
-// ── Risk level helpers (sama logika dengan backend) ──────────────────────────
+// ── Format helpers untuk display ──────────────────────────────────────────────
+const _fmtPrice = (val) => {
+  if (!val) return "";
+  const s = String(val).trim();
+  // Sudah ada Rp atau $ → return as is
+  if (/^(Rp|USD|\$|US\$)/.test(s)) return s;
+  // Coba parse angka
+  const num = parseFloat(s.replace(/[.,]/g, "").replace(",", "."));
+  if (!isNaN(num)) return `Rp ${num.toLocaleString("id-ID")}`;
+  return s;
+};
+
+const _fmtShares = (val) => {
+  if (!val) return "";
+  const s = String(val).trim();
+  // Sudah ada format teks → return as is jika sudah ada kata "lembar/saham/share"
+  if (/lembar|saham|share/i.test(s)) {
+    // Pastikan angkanya punya pemisah ribuan
+    return s.replace(/(\d+)(?=(\d{3})+(?!\d))/g, "$1.");
+  }
+  // Coba ekstrak angka
+  const numStr = s.replace(/[^0-9]/g, "");
+  if (!numStr) return s;
+  const num = parseInt(numStr);
+  if (isNaN(num)) return s;
+  if (num >= 1_000_000_000)
+    return `${(num / 1_000_000_000).toFixed(2)} miliar lembar`;
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(0)} juta lembar`;
+  return `${num.toLocaleString("id-ID")} lembar`;
+};
+
+const _fmtMarketCap = (val) => {
+  if (!val) return "";
+  const s = String(val).trim();
+  // Sudah format lengkap (ada T/M/B/miliar) → return as is
+  if (/[TMBtmb]$|triliun|miliar|billion/i.test(s)) return s;
+  // Sudah ada Rp tapi tanpa T/M → cek apakah perlu diformat
+  const numStr = s.replace(/[^0-9]/g, "");
+  if (!numStr) return s;
+  const num = parseFloat(numStr);
+  if (isNaN(num)) return s;
+  if (num >= 1_000_000_000_000)
+    return `Rp ${(num / 1_000_000_000_000).toFixed(2)} T`;
+  if (num >= 1_000_000_000) return `Rp ${(num / 1_000_000_000).toFixed(2)} M`;
+  if (num >= 1_000_000) return `Rp ${(num / 1_000_000).toFixed(0)} juta`;
+  return `Rp ${num.toLocaleString("id-ID")}`;
+};
+
+// ── Risk level helpers ────────────────────────────────────────────────────────
 const _computeRiskLevel = (risks) => {
   const p = { high: 3, medium: 2, low: 1 };
   const max = risks.reduce(
@@ -740,11 +788,14 @@ export default function App() {
           sector: d.sector || d.ipo_details?.sector || "",
           description: d.summary || MOCK.company.description,
           ipoDate: d.ipo_details?.ipo_date || MOCK.company.ipoDate,
-          offerPrice: d.ipo_details?.share_price || MOCK.company.offerPrice,
+          offerPrice:
+            _fmtPrice(d.ipo_details?.share_price) || MOCK.company.offerPrice,
           currentPrice: d.current_price || d.ipo_details?.current_price || "",
-          totalShares: d.ipo_details?.total_shares || MOCK.company.totalShares,
+          totalShares:
+            _fmtShares(d.ipo_details?.total_shares) || MOCK.company.totalShares,
           marketCap:
-            d.ipo_details?.market_cap || d.market_cap || MOCK.company.marketCap,
+            _fmtMarketCap(d.ipo_details?.market_cap || d.market_cap) ||
+            MOCK.company.marketCap,
           currency: d.financial?.currency || "IDR",
         },
         kpi: {
@@ -1869,31 +1920,199 @@ export default function App() {
                 </div>
 
                 {/* ── Underwriter Info jika ada ── */}
-                {D.underwriter && D.underwriter.lead && (
-                  <div className="mb-5 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-3">
-                    <p className="text-xs font-semibold text-blue-700 dark:text-blue-300 mb-1 flex items-center gap-1">
-                      🏦 {lang === "EN" ? "Underwriter" : "Penjamin Emisi Efek"}
-                    </p>
-                    <p className="text-sm font-bold text-gray-800 dark:text-gray-200">
-                      {D.underwriter.lead}
-                      {D.underwriter.others?.length > 0 && (
-                        <span className="font-normal text-gray-500 text-xs ml-2">
-                          + {D.underwriter.others.join(", ")}
-                        </span>
-                      )}
-                    </p>
-                    {D.underwriter.type && (
-                      <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                        {D.underwriter.type}
-                      </p>
-                    )}
-                    {D.underwriter.reputation && (
-                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">
-                        {D.underwriter.reputation}
-                      </p>
-                    )}
-                  </div>
-                )}
+                {D.underwriter &&
+                  D.underwriter.lead &&
+                  (() => {
+                    // ── Hitung rating bintang dari reputasi ──
+                    const rep = (D.underwriter.reputation || "").toLowerCase();
+                    const isFullCommit =
+                      (D.underwriter.type || "")
+                        .toLowerCase()
+                        .includes("penuh") ||
+                      (D.underwriter.type || "").toLowerCase().includes("full");
+                    let stars = 3; // default medium
+                    if (
+                      /sangat baik|terbesar|tier.?1|top tier|terkemuka|mandiri sekuritas|bca sekuritas|bri danareksa|mirae|trimegah|bahana|cgs.?cimb|indo premier/i.test(
+                        rep,
+                      )
+                    )
+                      stars = 5;
+                    else if (
+                      /baik|cukup dikenal|bereputasi|terpercaya/i.test(rep)
+                    )
+                      stars = 4;
+                    else if (/kurang dikenal|perlu diwaspadai|kecil/i.test(rep))
+                      stars = 2;
+                    else if (/tidak dikenal|sanksi|buruk/i.test(rep)) stars = 1;
+                    if (isFullCommit && stars >= 3)
+                      stars = Math.min(stars + 0.5, 5);
+
+                    const StarRating = ({ rating }) => {
+                      const full = Math.floor(rating);
+                      const half = rating % 1 >= 0.5;
+                      const empty = 5 - full - (half ? 1 : 0);
+                      return (
+                        <div className="flex items-center gap-0.5">
+                          {[...Array(full)].map((_, i) => (
+                            <svg
+                              key={`f${i}`}
+                              className="w-4 h-4 text-amber-400"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                            </svg>
+                          ))}
+                          {half && (
+                            <svg
+                              className="w-4 h-4 text-amber-400"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <defs>
+                                <linearGradient id="half">
+                                  <stop offset="50%" stopColor="currentColor" />
+                                  <stop offset="50%" stopColor="transparent" />
+                                </linearGradient>
+                              </defs>
+                              <path
+                                fill="url(#half)"
+                                d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"
+                              />
+                            </svg>
+                          )}
+                          {[...Array(empty)].map((_, i) => (
+                            <svg
+                              key={`e${i}`}
+                              className="w-4 h-4 text-gray-300 dark:text-gray-600"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                            </svg>
+                          ))}
+                          <span className="text-xs font-bold text-amber-500 ml-1">
+                            {rating.toFixed(1)}
+                          </span>
+                        </div>
+                      );
+                    };
+
+                    const ratingLabel =
+                      stars >= 4.5
+                        ? lang === "EN"
+                          ? "Excellent"
+                          : "Sangat Baik"
+                        : stars >= 3.5
+                          ? lang === "EN"
+                            ? "Good"
+                            : "Baik"
+                          : stars >= 2.5
+                            ? lang === "EN"
+                              ? "Average"
+                              : "Cukup"
+                            : lang === "EN"
+                              ? "Below Average"
+                              : "Kurang";
+
+                    return (
+                      <div className="mb-5 rounded-2xl overflow-hidden border border-blue-200 dark:border-blue-800 shadow-sm">
+                        {/* Header */}
+                        <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-5 py-3 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-white text-base">🏦</span>
+                            <span className="text-white text-sm font-bold">
+                              {lang === "EN"
+                                ? "Underwriter Analysis"
+                                : "Analisis Penjamin Emisi Efek"}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <StarRating rating={stars} />
+                            <span className="text-xs font-semibold text-blue-100 bg-blue-800/50 px-2 py-0.5 rounded-full">
+                              {ratingLabel}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Body */}
+                        <div className="bg-white dark:bg-gray-900 px-5 py-4 space-y-3">
+                          {/* Penjamin Pelaksana Utama */}
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                              {lang === "EN"
+                                ? "Lead Underwriter"
+                                : "Penjamin Pelaksana Emisi Efek"}
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold text-gray-900 dark:text-white">
+                                {D.underwriter.lead}
+                              </span>
+                              {isFullCommit && (
+                                <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full font-semibold">
+                                  ✓ Full Commitment
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Co-underwriter */}
+                          {D.underwriter.others?.length > 0 && (
+                            <div>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                                {lang === "EN"
+                                  ? "Co-Underwriter"
+                                  : "Penjamin Emisi Efek"}
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {D.underwriter.others.map((uw, i) => (
+                                  <span
+                                    key={i}
+                                    className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-2.5 py-1 rounded-full border border-gray-200 dark:border-gray-700"
+                                  >
+                                    {uw}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Jenis Penjaminan */}
+                          {D.underwriter.type && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                                {lang === "EN"
+                                  ? "Commitment Type"
+                                  : "Jenis Penjaminan"}
+                                :
+                              </span>
+                              <span
+                                className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                  isFullCommit
+                                    ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                                    : "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300"
+                                }`}
+                              >
+                                {D.underwriter.type}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Reputasi */}
+                          {D.underwriter.reputation && (
+                            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                                {lang === "EN" ? "Track Record" : "Rekam Jejak"}
+                              </p>
+                              <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
+                                {D.underwriter.reputation}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                 <div className="space-y-5">
                   {/* Risk Factors */}
