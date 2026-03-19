@@ -19,7 +19,14 @@ BAGIAN 1: IDENTITAS PERUSAHAAN
 ===================================================
 Ekstrak dengan teliti:
 - company_name: Nama lengkap perusahaan termasuk "Tbk"
-- ticker: Kosongkan "" — akan dicari otomatis
+- ticker: Cari kode saham IDX perusahaan ini dari PENGETAHUANMU tentang pasar modal Indonesia.
+  Kode saham IDX adalah 2-6 huruf kapital yang unik untuk setiap perusahaan.
+  Jika kamu tahu kode sahamnya (contoh: EMAS, BBRI, TLKM, GOTO) → isi dengan benar.
+  Jika tidak yakin sama sekali → isi ""
+  JANGAN mengarang — hanya isi jika yakin benar.
+  Contoh: PT Merdeka Gold Resources Tbk → "EMAS"
+          PT Bank Central Asia Tbk → "BBCA"
+          PT Telkom Indonesia Tbk → "TLKM"
 - sector: Sektor SPESIFIK (contoh: "Pertambangan Emas & Mineral Ikutan", bukan hanya "Pertambangan")
 - ipo_date: Tanggal pencatatan di BEI
 - share_price: Harga penawaran final (jika ada range, ambil nilai TERTINGGI)

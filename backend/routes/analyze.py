@@ -78,16 +78,23 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
         analysis.risks    = json.dumps(risks)
         analysis.benefits = json.dumps(benefits)
 
-        # ── 3. Cari ticker via IDX/Yahoo Finance (bukan dari Gemini) ─────
-        company_name = result.get("company_name", analysis.company_name)
+        # ── 3. Cari ticker — Gemini knowledge + IDX/Yahoo verification ───
+        company_name         = result.get("company_name", analysis.company_name)
+        ticker_from_gemini   = result.get("ticker", "").strip().upper()
 
-        try:
-            # Langsung cari berdasarkan nama perusahaan, ignore ticker dari Gemini
-            ticker = get_ticker_from_google(company_name, "")
-            logger.info(f"Ticker ditemukan via search: {ticker} untuk {company_name}")
-        except Exception as e:
-            logger.warning(f"Gagal cari ticker: {e}")
-            ticker = ""
+        ticker = ""
+        if ticker_from_gemini and len(ticker_from_gemini) >= 2:
+            # Gemini tahu tickernya — gunakan langsung
+            ticker = ticker_from_gemini
+            logger.info(f"Ticker dari Gemini: {ticker}")
+        else:
+            # Gemini tidak tahu — cari via IDX/Yahoo
+            try:
+                ticker = get_ticker_from_google(company_name, "")
+                logger.info(f"Ticker dari search: {ticker}")
+            except Exception as e:
+                logger.warning(f"Gagal cari ticker: {e}")
+                ticker = ""
 
         # ── 4. Ambil harga live dari Google Finance ───────────────────────
         market = {}
