@@ -25,23 +25,8 @@ LANGKAH 1 — IDENTIFIKASI DOKUMEN
 LANGKAH 2 — DATA IDENTITAS
 ============================
 - Nama perusahaan lengkap (termasuk Tbk)
-
-KODE TICKER SAHAM — SANGAT PENTING, CARI DENGAN TELITI:
-  Kode ticker adalah 4 huruf kapital yang merupakan kode resmi saham di BEI.
-  Cari di lokasi berikut secara berurutan:
-  1. Halaman sampul/judul: biasanya tertulis "Kode Saham: XXXX" atau "Kode Efek: XXXX"
-  2. Tabel "Struktur Kepemilikan Saham Setelah IPO" — kolom paling atas
-  3. Bagian "Pencatatan di Bursa" atau "Rencana Pencatatan Efek"
-  4. Header dokumen atau footer halaman
-  5. Bagian "Informasi Penawaran Umum" — baris Kode Saham/Kode Efek
-  ATURAN TICKER:
-  - Kode saham IDX terdiri dari 2-6 huruf kapital (umumnya 4 huruf, tapi tidak selalu)
-  - Contoh 4 huruf: BBRI, TLKM, GOTO, CDIA, MGRO, BREN, PTBA, ANTM
-  - Contoh lain: bisa 2, 3, 5, atau 6 huruf tergantung perusahaan
-  - JANGAN gunakan nama perusahaan sebagai ticker
-  - JANGAN mengarang ticker — jika tidak ditemukan sama sekali, isi null
-  - Ticker berbeda dari nama perusahaan (PT Bank BRI Tbk → ticker: BBRI)
-  - Cari di SELURUH dokumen sebelum menyerah
+- TICKER SAHAM: JANGAN isi, biarkan kosong "" — ticker akan dicari otomatis via Yahoo Finance/IDX
+- Sektor industri: tulis spesifik (contoh: "Pertambangan Emas & Mineral", bukan hanya "Pertambangan")
 
 - Sektor industri: tulis spesifik (contoh: "Pertambangan Emas & Mineral", bukan hanya "Pertambangan")
 - Tanggal Pencatatan di BEI
@@ -179,7 +164,7 @@ PROSPEKTUS:
 OUTPUT JSON (struktur persis ini):
 {{
   "company_name": "PT Merdeka Gold Resources Tbk",
-  "ticker": "MGRO",
+  "ticker": "",
   "underwriter": {{
     "lead": "Mandiri Sekuritas",
     "others": ["BCA Sekuritas", "CGS-CIMB Sekuritas"],

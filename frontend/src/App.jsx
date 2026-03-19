@@ -687,14 +687,8 @@ export default function App() {
         `${API_BASE}/analysis/${up.data.analysis_id}`,
       );
       const d = res.data;
-      // Ticker: dari field ticker, atau dari ipo_details, atau 4 huruf pertama nama
-      const ticker =
-        d.ipo_details?.ticker ||
-        d.ipo_details?.ticker_code ||
-        d.company_name
-          ?.replace(/[^A-Z]/gi, "")
-          .slice(0, 4)
-          .toUpperCase();
+      // Ticker: HANYA dari hasil search market_data (ticker dari API), bukan dari prospektus
+      const ticker = d.ticker || d.ipo_details?.ticker || "";
 
       // Helper: pastikan nilai persen sudah angka, bukan string
       const toNum = (v) =>
@@ -702,15 +696,16 @@ export default function App() {
           ? null
           : parseFloat(String(v).replace("%", ""));
 
-      // Normalisasi array financial dari Gemini
+      // Normalisasi array financial dari Gemini — lebih permisif
       const normFinancial = (arr) => {
-        if (!arr || !Array.isArray(arr)) return null;
-        return arr
+        if (!arr || !Array.isArray(arr) || arr.length === 0) return null;
+        const result = arr
           .map((item) => ({
             year: String(item.year || ""),
             value: toNum(item.value),
           }))
-          .filter((x) => x.year && x.value !== null);
+          .filter((x) => x.year && x.value !== null && !isNaN(x.value));
+        return result.length > 0 ? result : null;
       };
 
       // ── trend analysis helper ──
@@ -800,9 +795,10 @@ export default function App() {
           ),
         },
         useOfProceeds:
-          d.ipo_details?.use_of_funds?.map((x, i) => ({
-            name: x.category,
-            value: x.allocation,
+          (d.use_of_funds || d.ipo_details?.use_of_funds)?.map((x, i) => ({
+            name: x.category || x.name || "",
+            value: x.allocation || x.value || 0,
+            desc: x.description || "",
             color: ["#10B981", "#3B82F6", "#F59E0B", "#8B5CF6", "#EC4899"][
               i % 5
             ],
@@ -1807,24 +1803,28 @@ export default function App() {
                     />
                   </PieChart>
                 </ResponsiveContainer>
-                {/* Static legend with % */}
-                <div className="mt-3 grid grid-cols-1 gap-2">
+                {/* Static legend with % + description */}
+                <div className="mt-3 grid grid-cols-1 gap-3">
                   {D.useOfProceeds.map((e, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between px-1"
-                    >
-                      <div className="flex items-center gap-2">
+                    <div key={i} className="flex items-start gap-3 px-1">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
                         <span
-                          className="w-3 h-3 rounded-full flex-shrink-0"
+                          className="w-3 h-3 rounded-full flex-shrink-0 mt-1"
                           style={{ backgroundColor: e.color }}
                         />
-                        <span className="text-sm text-gray-700 dark:text-gray-300">
-                          {e.name}
-                        </span>
+                        <div className="min-w-0">
+                          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                            {e.name}
+                          </span>
+                          {e.desc && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-relaxed">
+                              {e.desc}
+                            </p>
+                          )}
+                        </div>
                       </div>
                       <span
-                        className="text-sm font-bold"
+                        className="text-sm font-bold flex-shrink-0"
                         style={{ color: e.color }}
                       >
                         {e.value}%
@@ -1902,7 +1902,7 @@ export default function App() {
                       <AlertTriangle className="w-4 h-4" />
                       {l.dash.rf}
                     </h4>
-                    <div className="space-y-2.5">
+                    <div className="space-y-3">
                       {D.riskFactors.map((r, i) => {
                         const level = r.level || "Medium";
                         const title = r.title || r;
@@ -1912,30 +1912,56 @@ export default function App() {
                             : level === "Low"
                               ? "🟢"
                               : "🟡";
+                        const levelText =
+                          level === "High"
+                            ? lang === "EN"
+                              ? "High Risk"
+                              : "Risiko Tinggi"
+                            : level === "Low"
+                              ? lang === "EN"
+                                ? "Low Risk"
+                                : "Risiko Rendah"
+                              : lang === "EN"
+                                ? "Medium Risk"
+                                : "Risiko Sedang";
                         return (
                           <div
                             key={i}
-                            className={`border-l-4 rounded-r-xl px-4 py-3 ${riskColor(level)}`}
+                            className={`rounded-xl overflow-hidden border ${
+                              level === "High"
+                                ? "border-red-200 dark:border-red-800"
+                                : level === "Low"
+                                  ? "border-green-200 dark:border-green-800"
+                                  : "border-yellow-200 dark:border-yellow-800"
+                            }`}
                           >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-start gap-2 flex-1 min-w-0">
-                                <span className="text-sm mt-0.5">
-                                  {levelIcon}
-                                </span>
-                                <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                                  {title}
-                                </p>
-                              </div>
+                            {/* Kategori/Level header */}
+                            <div
+                              className={`flex items-center gap-2 px-4 py-2 ${
+                                level === "High"
+                                  ? "bg-red-50 dark:bg-red-900/30"
+                                  : level === "Low"
+                                    ? "bg-green-50 dark:bg-green-900/30"
+                                    : "bg-yellow-50 dark:bg-yellow-900/30"
+                              }`}
+                            >
+                              <span className="text-sm">{levelIcon}</span>
                               <span
-                                className={`text-xs font-bold px-2.5 py-1 rounded-full flex-shrink-0 ${riskBadge(level)}`}
+                                className={`text-xs font-bold ${riskBadge(level)} px-2 py-0.5 rounded-full`}
                               >
-                                {level}
+                                {levelText}
+                              </span>
+                              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 ml-1">
+                                {title}
                               </span>
                             </div>
+                            {/* Penjelasan */}
                             {r.desc && (
-                              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1.5 ml-6 leading-relaxed">
-                                {r.desc}
-                              </p>
+                              <div className="px-4 py-3 bg-white dark:bg-gray-900">
+                                <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+                                  {r.desc}
+                                </p>
+                              </div>
                             )}
                           </div>
                         );

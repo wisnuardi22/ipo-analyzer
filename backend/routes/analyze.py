@@ -78,15 +78,16 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
         analysis.risks    = json.dumps(risks)
         analysis.benefits = json.dumps(benefits)
 
-        # ── 3. Verifikasi ticker via Google Search ────────────────────────
-        ticker_from_prospectus = result.get("ticker", "")
-        company_name           = result.get("company_name", analysis.company_name)
+        # ── 3. Cari ticker via IDX/Yahoo Finance (bukan dari Gemini) ─────
+        company_name = result.get("company_name", analysis.company_name)
 
         try:
-            ticker = get_ticker_from_google(company_name, ticker_from_prospectus)
+            # Langsung cari berdasarkan nama perusahaan, ignore ticker dari Gemini
+            ticker = get_ticker_from_google(company_name, "")
+            logger.info(f"Ticker ditemukan via search: {ticker} untuk {company_name}")
         except Exception as e:
-            logger.warning(f"Gagal verifikasi ticker: {e}")
-            ticker = ticker_from_prospectus
+            logger.warning(f"Gagal cari ticker: {e}")
+            ticker = ""
 
         # ── 4. Ambil harga live dari Google Finance ───────────────────────
         market = {}
