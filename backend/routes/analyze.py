@@ -99,7 +99,7 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
 
         # ── 5. Simpan ipo_details ─────────────────────────────────────────
         analysis.ipo_details = json.dumps({
-            "ticker":               ticker or ticker_from_prospectus,
+            "ticker":               ticker or "",
             "sector":               result.get("sector", ""),
             "ipo_date":             result.get("ipo_date", ""),
             "share_price":          result.get("share_price", ""),
