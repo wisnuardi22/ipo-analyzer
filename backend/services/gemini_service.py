@@ -45,52 +45,89 @@ Paragraf 3 — Tujuan IPO: Dana dipakai untuk apa, target ke depan, visi pertumb
 Pisahkan paragraf dengan \\n\\n. WAJIB spesifik dengan data angka dari prospektus.
 
 ===================================================
-BAGIAN 3: DATA KEUANGAN — BACA DARI TABEL AKTUAL
+BAGIAN 3: DATA KEUANGAN — BACA LAPORAN KEUANGAN
 ===================================================
 
-LANGKAH 1 — TEMUKAN TABEL:
-Cari di dokumen dengan kata kunci (urutan prioritas):
+PENTING: Laporan keuangan di prospektus Indonesia TIDAK selalu berbentuk tabel ringkasan.
+Seringkali berbentuk LAPORAN KEUANGAN STANDAR dengan format kolom angka seperti ini:
+
+  LAPORAN LABA RUGI KOMPREHENSIF KONSOLIDASIAN
+                                    2024           2023
+  Pendapatan Bersih            102.254.765     75.765.791
+  Beban Pokok Pendapatan       (91.789.624)   (69.387.445)
+  Laba Kotor                    10.465.141      6.378.346
+  Laba Usaha                       214.890        8.234
+  Laba Bersih                      456.123      234.567
+
+LANGKAH 1 — CARI LAPORAN KEUANGAN:
+Cari bagian dengan salah satu judul berikut:
+→ "LAPORAN LABA RUGI DAN PENGHASILAN KOMPREHENSIF LAIN KONSOLIDASIAN"
+→ "LAPORAN LABA RUGI KOMPREHENSIF KONSOLIDASIAN"
+→ "LAPORAN LABA RUGI DAN PENGHASILAN KOMPREHENSIF LAIN"
+→ "CONSOLIDATED STATEMENTS OF PROFIT OR LOSS AND OTHER COMPREHENSIVE INCOME"
+→ "CONSOLIDATED STATEMENTS OF PROFIT OR LOSS"
 → "Ikhtisar Data Keuangan Penting"
-→ "Laporan Laba Rugi Konsolidasian" / "Consolidated Statements of Profit or Loss"
 → "Ringkasan Laporan Keuangan"
 → "Informasi Keuangan Ringkas"
-→ Tabel apapun yang berisi: Pendapatan, Laba Kotor, Laba Bersih
+→ "Informasi Keuangan Penting"
 
-LANGKAH 2 — CATAT ANGKA MENTAH:
-Dari tabel yang ditemukan, catat PERSIS:
-- Tahun: (misal 2022, 2023, 2024)
-- Total Pendapatan / Total Revenue / Net Revenue tiap tahun
-- Laba Kotor / Gross Profit tiap tahun
-- Laba Usaha / Operating Profit tiap tahun
-- Laba Bersih / Net Profit tiap tahun
-- Mata uang: IDR (Rupiah) atau USD (Dolar)
+LANGKAH 2 — BACA ANGKA DARI LAPORAN:
+Identifikasi baris-baris berikut dan catat angkanya PER TAHUN:
 
-LANGKAH 3 — HITUNG METRIK (dari angka di langkah 2):
+a) PENDAPATAN: cari baris berlabel:
+   "Pendapatan Bersih" / "Pendapatan" / "Revenue" / "Total Pendapatan"
+   
+b) BEBAN POKOK: cari baris berlabel:
+   "Beban Pokok Pendapatan" / "Beban Pokok Penjualan" / "HPP" / "Cost of Revenue"
+   
+c) LABA KOTOR: cari baris berlabel:
+   "Laba Kotor" / "Gross Profit"
+   Jika tidak ada: Laba Kotor = Pendapatan - Beban Pokok
+   
+d) LABA USAHA: cari baris berlabel:
+   "Laba Usaha" / "Laba Operasi" / "Operating Profit/Loss" / "Laba (Rugi) Usaha"
+   
+e) LABA BERSIH: cari baris berlabel:
+   "Laba (Rugi) Bersih" / "Laba Bersih Tahun Berjalan" / "Net Profit/Loss"
+   PERHATIAN: Gunakan "Laba Bersih yang Dapat Diatribusikan kepada Pemilik Entitas Induk"
+   jika ada, bukan total laba konsolidasi
+
+f) DEPRESIASI & AMORTISASI: cari di:
+   "Penyusutan" / "Depresiasi" / "Amortisasi" / "Depreciation"
+   Biasanya ada di laporan arus kas atau catatan keuangan
+
+LANGKAH 3 — PERHATIKAN FORMAT ANGKA:
+Angka di laporan keuangan Indonesia biasanya dalam:
+- Rupiah penuh: 102.254.765 (titik sebagai pemisah ribuan)
+- Jutaan Rupiah: 102.254 (dalam jutaan)
+- Ribuan Rupiah: 102.254.765 (dalam ribuan)
+- USD: dengan koma desimal
+
+Cek satuan di header tabel (biasanya tertulis "dalam jutaan Rupiah" atau "dalam ribuan USD")
+
+LANGKAH 4 — HITUNG METRIK:
+Gunakan angka AKTUAL yang sudah dibaca dari laporan:
+
 A) Revenue Growth % = ((Rev_N - Rev_(N-1)) / |Rev_(N-1)|) × 100
-   Tahun PERTAMA yang ada di dokumen = 0 (tidak ada pembanding sebelumnya)
+   → Tahun PERTAMA di dokumen = 0
 
 B) Gross Margin % = (Laba Kotor / Pendapatan) × 100
+   → Contoh: (10.465.141 / 102.254.765) × 100 = 10.23
 
 C) Operating Margin % = (Laba Usaha / Pendapatan) × 100
-   BOLEH negatif jika perusahaan masih rugi operasi
+   → BOLEH negatif
 
-D) EBITDA Margin % = ((Laba Usaha + Depresiasi + Amortisasi) / Pendapatan) × 100
-   Jika D&A tidak ada → null
+D) EBITDA Margin % = ((Laba Usaha + D&A) / Pendapatan) × 100
+   → Jika D&A tidak ada → null
 
 E) Net Profit Margin % = (Laba Bersih / Pendapatan) × 100
-   BOLEH negatif jika masih rugi bersih
+   → BOLEH negatif
 
-FORMAT OUTPUT:
-- Semua nilai: angka desimal TANPA simbol %, TANPA koma ribuan
-- Benar: 34.56 | Salah: "34.56%" atau 34,56
-- Data tidak ada: null (BUKAN 0, BUKAN "")
+FORMAT: angka desimal TANPA %, TANPA koma ribuan
+✅ Benar: 10.23 | ❌ Salah: "10.23%" atau "10,23"
+Data tidak ada: null (bukan 0, bukan "")
 
-LARANGAN KERAS:
-❌ JANGAN pakai angka yang sama untuk perusahaan berbeda
-❌ JANGAN mengarang angka yang tidak ada di dokumen
-❌ JANGAN menggunakan angka dari contoh JSON di bawah ini
-
-Mata uang: tulis "IDR" atau "USD" sesuai yang ada di laporan keuangan
+❌ LARANGAN: Jangan pakai angka fiktif atau sama dengan contoh JSON
 A) Revenue Growth (%) = ((Pendapatan_N - Pendapatan_N-1) / |Pendapatan_N-1|) × 100
    → Tahun pertama yang tersedia = 0 (tidak ada pembanding)
    → Contoh: Rev 2023=500M, Rev 2024=750M → Growth 2024 = ((750-500)/500)×100 = 50.0
