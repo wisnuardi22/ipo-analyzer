@@ -1912,18 +1912,6 @@ export default function App() {
                             : level === "Low"
                               ? "🟢"
                               : "🟡";
-                        const levelText =
-                          level === "High"
-                            ? lang === "EN"
-                              ? "High Risk"
-                              : "Risiko Tinggi"
-                            : level === "Low"
-                              ? lang === "EN"
-                                ? "Low Risk"
-                                : "Risiko Rendah"
-                              : lang === "EN"
-                                ? "Medium Risk"
-                                : "Risiko Sedang";
                         return (
                           <div
                             key={i}
@@ -1935,9 +1923,9 @@ export default function App() {
                                   : "border-yellow-200 dark:border-yellow-800"
                             }`}
                           >
-                            {/* Kategori/Level header */}
+                            {/* Header: icon + judul saja, TANPA badge level */}
                             <div
-                              className={`flex items-center gap-2 px-4 py-2 ${
+                              className={`flex items-center gap-2 px-4 py-2.5 ${
                                 level === "High"
                                   ? "bg-red-50 dark:bg-red-900/30"
                                   : level === "Low"
@@ -1945,13 +1933,10 @@ export default function App() {
                                     : "bg-yellow-50 dark:bg-yellow-900/30"
                               }`}
                             >
-                              <span className="text-sm">{levelIcon}</span>
-                              <span
-                                className={`text-xs font-bold ${riskBadge(level)} px-2 py-0.5 rounded-full`}
-                              >
-                                {levelText}
+                              <span className="text-sm flex-shrink-0">
+                                {levelIcon}
                               </span>
-                              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 ml-1">
+                              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
                                 {title}
                               </span>
                             </div>

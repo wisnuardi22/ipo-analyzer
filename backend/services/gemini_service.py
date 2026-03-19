@@ -1,248 +1,237 @@
 from openai import OpenAI
-import json, os
+import json, re, os
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-# Gemini via OpenAI-compatible endpoint
 client = OpenAI(
     api_key=os.environ.get('SUMOPOD_API_KEY'),
     base_url="https://ai.sumopod.com/v1"
 )
 
 def analyze_prospectus(text: str) -> dict:
-    prompt = f"""Kamu adalah analis keuangan IPO Indonesia senior (CFA level 3). Baca dokumen prospektus berikut dengan sangat teliti dan ekstrak semua informasi yang diminta.
+    prompt = f"""Kamu adalah analis keuangan IPO Indonesia kelas dunia (CFA Level 3, 20 tahun pengalaman di Mandiri Sekuritas dan Morgan Stanley). Tugasmu adalah menghasilkan analisis IPO berkualitas institusional dari dokumen prospektus berikut.
 
-============================
-LANGKAH 1 — IDENTIFIKASI DOKUMEN
-============================
-- Prospektus ringkas atau lengkap?
-- Berapa tahun data keuangan? (bisa 2, 3, atau 4 tahun)
-- Mata uang: IDR atau USD?
-- JANGAN mengarang data yang tidak ada di prospektus
+PENTING: Setiap analisis HARUS UNIK dan SPESIFIK untuk perusahaan ini. Jangan gunakan data generik atau template. Baca dokumen dengan sangat teliti.
 
-============================
-LANGKAH 2 — DATA IDENTITAS
-============================
-- Nama perusahaan lengkap (termasuk Tbk)
-- TICKER SAHAM: JANGAN isi, biarkan kosong "" — ticker akan dicari otomatis via Yahoo Finance/IDX
-- Sektor industri: tulis spesifik (contoh: "Pertambangan Emas & Mineral", bukan hanya "Pertambangan")
+===================================================
+BAGIAN 1: IDENTITAS PERUSAHAAN
+===================================================
+Ekstrak dengan teliti:
+- company_name: Nama lengkap perusahaan termasuk "Tbk"
+- ticker: Kosongkan "" — akan dicari otomatis
+- sector: Sektor SPESIFIK (contoh: "Pertambangan Emas & Mineral Ikutan", bukan hanya "Pertambangan")
+- ipo_date: Tanggal pencatatan di BEI
+- share_price: Harga penawaran final (jika ada range, ambil nilai TERTINGGI)
+- total_shares: Total saham beredar SETELAH IPO (bukan sebelum)
+- market_cap: Nilai kapitalisasi pasar (harga × total saham)
 
-- Sektor industri: tulis spesifik (contoh: "Pertambangan Emas & Mineral", bukan hanya "Pertambangan")
-- Tanggal Pencatatan di BEI
-- Harga penawaran: jika range, ambil NILAI TERTINGGI
-- Total saham beredar SETELAH IPO
-- Market cap
+===================================================
+BAGIAN 2: RINGKASAN PERUSAHAAN
+===================================================
+Tulis summary 3 paragraf dalam Bahasa Indonesia AWAM (tidak perlu jargon):
 
-============================
-LANGKAH 3 — RINGKASAN PERUSAHAAN (summary)
-============================
-Tulis dalam Bahasa Indonesia yang MUDAH DIMENGERTI orang awam (bukan investor profesional).
-Gunakan bahasa sehari-hari, hindari jargon teknis berlebihan.
-Struktur 3 paragraf:
-1. Paragraf 1: Perusahaan ini bergerak di bidang apa, produk/jasa utamanya apa, berdiri kapan dan di mana
-2. Paragraf 2: Siapa pelanggan utamanya, posisi di industri, keunggulan utama dibanding kompetitor
-3. Paragraf 3: Tujuan IPO ini dan apa yang ingin dicapai perusahaan ke depan
-Pisahkan tiap paragraf dengan \\n\\n
+Paragraf 1 — Profil: Perusahaan ini apa, produk/jasa utama, berdiri kapan & di mana, skala bisnis
+Paragraf 2 — Posisi Pasar: Pelanggan utama, pangsa pasar, keunggulan vs kompetitor, moat bisnis
+Paragraf 3 — Tujuan IPO: Dana dipakai untuk apa, target ke depan, visi pertumbuhan
 
-============================
-LANGKAH 4 — DATA KEUANGAN
-============================
-Cari di: "Ikhtisar Data Keuangan Penting", "Laporan Laba Rugi", tabel keuangan apapun.
+Pisahkan paragraf dengan \\n\\n. WAJIB spesifik dengan data angka dari prospektus.
 
-ATURAN KETAT:
-✓ Gunakan TAHUN AKTUAL dari prospektus
-✓ Tahun pertama: revenue_growth = 0
-✓ Semua margin: angka desimal TANPA persen. Contoh: 10.23 bukan "10.23%"
-✓ Data tidak ada = null (bukan 0)
-✓ FOKUS PADA TREN: cari data dari tabel laporan keuangan multi-tahun
+===================================================
+BAGIAN 3: DATA KEUANGAN — HARUS DARI TABEL DI PROSPEKTUS
+===================================================
+Cari tabel: "Ikhtisar Data Keuangan Penting", "Laporan Laba Rugi Konsolidasian", "Ringkasan Keuangan"
 
-RUMUS:
-A) Revenue Growth (%) = ((Rev_N - Rev_N-1) / |Rev_N-1|) × 100, tahun pertama = 0
+PENTING: Data keuangan ini WAJIB berbeda antar perusahaan. Baca dan hitung dari angka aktual di tabel.
+
+Tahun yang tersedia: bisa 1, 2, 3, atau 4 tahun — gunakan SEMUA yang ada di dokumen.
+Mata uang: IDR atau USD — tulis apa adanya di field "currency".
+
+CARA HITUNG (gunakan angka dari tabel, bukan estimasi):
+A) Revenue Growth (%) = ((Pendapatan_N - Pendapatan_N-1) / |Pendapatan_N-1|) × 100
+   → Tahun pertama yang tersedia = 0 (tidak ada pembanding)
+   → Contoh: Rev 2023=500M, Rev 2024=750M → Growth 2024 = ((750-500)/500)×100 = 50.0
+
 B) Gross Margin (%) = (Laba Kotor / Pendapatan) × 100
-C) Operating Margin (%) = (Laba Usaha / Pendapatan) × 100, boleh negatif
-D) EBITDA Margin (%) = (EBITDA / Pendapatan) × 100, jika D&A tidak ada = null
+   → Laba Kotor = Pendapatan - Beban Pokok Penjualan (HPP/COGS)
+   → Jika langsung ada di tabel rasio, gunakan nilai tersebut
+
+C) Operating Margin (%) = (Laba Usaha / Pendapatan) × 100
+   → Laba Usaha = setelah dikurangi semua beban operasional
+   → Boleh negatif jika perusahaan masih rugi operasional
+
+D) EBITDA Margin (%) = ((Laba Usaha + D&A) / Pendapatan) × 100
+   → Jika D&A tidak ada di ringkasan, cari di laporan arus kas atau catatan keuangan
+   → Jika benar-benar tidak ada → null
+
 E) Net Profit Margin (%) = (Laba Bersih / Pendapatan) × 100
+   → Laba Bersih = laba setelah pajak (bukan laba kotor)
 
-============================
-LANGKAH 5 — KPI RELEVAN DENGAN INDUSTRI
-============================
-PENTING: Sesuaikan KPI dengan industri perusahaan!
+FORMAT: Semua nilai ANGKA DESIMAL tanpa simbol %, tanpa koma ribuan.
+Contoh BENAR: 34.56 | Contoh SALAH: "34.56%" atau "34,56"
 
-Contoh KPI per industri:
-- Pertambangan: EV/EBITDA, Reserve Life Index, Cash Cost/oz
-- Perbankan: NIM, NPL, CAR, ROA
-- Properti: NAV discount, Pre-sales, DER
-- Teknologi: P/S Ratio, ARR Growth, Churn Rate
-- Manufaktur: Asset Turnover, Inventory Turnover, ROIC
-- Retail: Same-store sales growth, Revenue/sq m
-- Infrastruktur: EV/EBITDA, Debt Coverage Ratio, IRR
+===================================================
+BAGIAN 4: KPI SPESIFIK INDUSTRI
+===================================================
+Pilih 4-6 KPI yang PALING RELEVAN dengan industri perusahaan ini:
 
-Untuk IPO ini, pilih 4-6 KPI yang paling relevan dengan sektornya.
-Selalu sertakan: P/E, Market Cap.
-Tambahkan KPI spesifik industri sebagai field tambahan di object kpi.
+Pertambangan/Energi: P/E, EV/EBITDA, Cash Cost per unit, Reserve Life (tahun), DER
+Perbankan/Keuangan: P/E, P/B, NIM, NPL ratio, CAR, ROA, ROE
+Properti/Konstruksi: P/E, P/B, NAV discount, DER, Pre-sales coverage
+Teknologi/Digital: P/E, P/S, Revenue Growth, Gross Margin, Burn Rate
+Manufaktur: P/E, P/B, ROIC, Asset Turnover, Inventory Days
+Retail/Consumer: P/E, EV/EBITDA, Same-store growth, Revenue per outlet
+Infrastruktur: P/E, EV/EBITDA, IRR, Debt Coverage Ratio, Backlog
 
-============================
-LANGKAH 6 — PENGGUNAAN DANA IPO
-============================
-Baca bagian "Rencana Penggunaan Dana" dengan SANGAT TELITI.
-- Ekstrak SETIAP alokasi dana beserta deskripsi detailnya
-- Hitung persentase dari total dana bersih IPO
-- Jumlah allocation HARUS = 100
-- Minimal 2, maksimal 5 item
-- description: jelaskan secara spesifik uang tersebut untuk apa (beli apa, bangun apa, bayar apa)
+Hitung P/E = Harga IPO / EPS terbaru (jika EPS tersedia di prospektus)
+Hitung P/B = Harga IPO / (Total Ekuitas / Total Saham)
+Selalu sertakan: pe, pb, roe, der, eps, mktcap
 
-============================
-LANGKAH 7 — ANALISIS RISIKO
-============================
-Baca bagian "Faktor Risiko" dari prospektus dengan teliti.
+===================================================
+BAGIAN 5: PENGGUNAAN DANA IPO
+===================================================
+Baca bagian "Rencana Penggunaan Dana" atau "Penggunaan Dana Hasil Penawaran Umum" dengan SANGAT TELITI.
 
-LANGKAH A — Tentukan SATU level risiko keseluruhan perusahaan ini:
-- "High"   → jika ada risiko yang bisa mengancam kelangsungan bisnis atau revenue utama
-- "Medium" → jika risiko masih bisa dikelola, tidak mengancam eksistensi perusahaan
-- "Low"    → jika semua risiko bersifat umum dan wajar untuk industri ini
+WAJIB:
+- Ekstrak SETIAP alokasi dana yang disebutkan
+- Hitung persentase dari total dana bersih
+- Jumlah semua allocation HARUS = 100
+- description: penjelasan SPESIFIK dan DETAIL (bukan generik)
+  Contoh BAIK: "Pembelian 3 unit kapal tanker kapasitas 50.000 DWT untuk ekspansi armada logistik"
+  Contoh BURUK: "Pengembangan bisnis" atau "Modal kerja"
 
-Tulis level ini di field "overall_risk_level" (hanya "High", "Medium", atau "Low")
-Tulis alasan singkat di field "overall_risk_reason" (1-2 kalimat)
+Minimal 2 item, maksimal 5 item.
 
-LANGKAH B — List faktor risiko SESUAI level yang dipilih (3-5 item):
-- Jika overall = "High"   → tampilkan hanya risiko yang level High
-- Jika overall = "Medium" → tampilkan hanya risiko yang level Medium
-- Jika overall = "Low"    → tampilkan hanya risiko yang level Low
-- Setiap item: title (nama risiko) + desc (penjelasan singkat bahasa awam)
-- JANGAN campurkan level berbeda dalam list risks
+===================================================
+BAGIAN 6: PENJAMIN EMISI EFEK
+===================================================
+Cari bagian "Penjaminan Emisi Efek" atau "Penjamin Pelaksana Emisi Efek":
+- lead: Nama penjamin pelaksana utama
+- others: Array nama co-underwriter lainnya
+- type: "Kesanggupan Penuh (Full Commitment)" atau "Kesanggupan Terbaik (Best Effort)"
+- reputation: Analisis track record penjamin berdasarkan pengetahuan pasar modal Indonesia
 
-============================
-LANGKAH 8 — KEUNGGULAN / BENEFIT (4-7 item)
-============================
-Dari bagian prospek usaha, keunggulan kompetitif, DAN analisis penjamin efek:
-- Tulis manfaat nyata bagi investor, bukan sekadar pujian perusahaan
-- Sertakan angka/data konkret jika tersedia
-- Jika penjamin efek bereputasi baik (mis: Mandiri Sekuritas, BCA Sekuritas, CGS-CIMB, UBS, dll):
-  tambahkan sebagai benefit dengan title "Didukung Penjamin Emisi Terpercaya"
-  dan desc berisi nama penjamin + track record singkatnya
+Top tier penjamin: Mandiri Sekuritas, BCA Sekuritas, BRI Danareksa, Mirae Asset, CGS-CIMB, Trimegah, Bahana, Indo Premier, Samuel
+Full Commitment = semua saham pasti terjual = POSITIF untuk investor
 
-============================
-============================
-LANGKAH 9 — PENJAMIN EFEK (UNDERWRITER)
-============================
-Cari di bagian "Penjaminan Emisi Efek", "Penjamin Pelaksana Emisi Efek", atau "Agen Penjual":
+===================================================
+BAGIAN 7: ANALISIS RISIKO
+===================================================
+Langkah A — Tentukan SATU level risiko keseluruhan berdasarkan analisis mendalam:
+- "High": Ada risiko sistemik yang bisa mengancam kelangsungan bisnis
+- "Medium": Risiko operasional yang bisa dikelola, bisnis tetap viable
+- "Low": Risiko minimal, bisnis mature dan stabil
 
-EKSTRAK:
-- Nama PENJAMIN PELAKSANA EMISI EFEK (lead underwriter) — perusahaan utama
-- Nama PENJAMIN EMISI EFEK lainnya (co-underwriter) — bisa beberapa
-- Sifat penjaminan: "Kesanggupan Penuh" (full commitment) atau "Kesanggupan Terbaik" (best effort)
-- Porsi/persentase penjaminan masing-masing jika disebutkan
+Isi "overall_risk_level" dan "overall_risk_reason" (2-3 kalimat alasan mengapa level ini).
 
-ANALISIS TRACK RECORD:
-Nilai reputasi berdasarkan pengetahuan pasar modal Indonesia:
+Langkah B — List 3-5 faktor risiko SESUAI level yang dipilih:
+- Setiap item: level (sama dengan overall), title (singkat), desc (penjelasan awam 1-2 kalimat)
+- SPESIFIK dengan data dari prospektus, BUKAN risiko generik
+- Hindari: "Risiko pasar", "Risiko regulasi" yang terlalu umum
 
-TIER 1 (Terpercaya): Mandiri Sekuritas, BCA Sekuritas, BRI Danareksa, Mirae Asset, CGS-CIMB, Trimegah, Bahana, UBS, Morgan Stanley, Indo Premier, Samuel Sekuritas
-TIER 2 (Cukup dikenal): Sekuritas menengah yang aktif di pasar modal
-TIER 3 (Perlu diwaspadai): Sekuritas kecil atau tidak dikenal, pernah kena sanksi OJK
+===================================================
+BAGIAN 8: KEUNGGULAN INVESTASI (BENEFIT)
+===================================================
+4-6 keunggulan NYATA dan SPESIFIK:
+- Sertakan angka konkret dari prospektus
+- Fokus pada mengapa investor harus tertarik
+- Sertakan analisis penjamin efek jika bereputasi baik
 
-ATURAN PENEMPATAN HASIL:
-- Tier 1 + Full Commitment → masuk "benefits": title "Didukung Penjamin Emisi Tier 1"
-- Tier 1 + Best Effort → masuk "benefits" dengan catatan risiko
-- Tier 2/3 → masuk "risks" level Medium
-- Best Effort (apapun tier) → JUGA tambahkan ke "risks" level Low: "Risiko Penjaminan Best Effort"
+===================================================
+ATURAN OUTPUT JSON — WAJIB DIPATUHI
+===================================================
+1. Output HANYA JSON murni — tidak ada teks sebelum atau sesudah
+2. Tidak ada markdown, tidak ada ```
+3. Semua string pakai tanda kutip ganda "
+4. Tidak ada trailing comma sebelum kurung tutup
+5. Nilai null untuk data yang tidak tersedia (bukan string kosong "")
 
-============================
-ATURAN OUTPUT — WAJIB DIPATUHI KETAT
-============================
-1. Output HANYA JSON murni — TIDAK ADA teks apapun sebelum atau sesudah JSON
-2. DILARANG menggunakan markdown, DILARANG menggunakan ```json atau ```
-3. Semua string WAJIB pakai tanda kutip ganda " bukan tanda kutip tunggal '
-4. DILARANG trailing comma — tidak boleh ada koma sebelum kurung tutup
-5. Semua field wajib diisi — jika data tidak ada gunakan null bukan string kosong
-6. JANGAN tambahkan komentar di dalam JSON
-7. Pastikan semua kurung buka memiliki pasangan kurung tutup
-
-PROSPEKTUS:
+DOKUMEN PROSPEKTUS:
 {text[:500000]}
 
-OUTPUT JSON (struktur persis ini):
+OUTPUT JSON:
 {{
   "company_name": "PT Merdeka Gold Resources Tbk",
   "ticker": "",
-  "underwriter": {{
-    "lead": "Mandiri Sekuritas",
-    "others": ["BCA Sekuritas", "CGS-CIMB Sekuritas"],
-    "type": "Penjaminan Penuh (Full Commitment)",
-    "reputation": "Sangat baik — Mandiri Sekuritas adalah penjamin emisi terbesar di Indonesia dengan 50+ IPO besar"
-  }},
-  "sector": "Pertambangan Emas & Mineral",
+  "sector": "Pertambangan Emas, Perak & Mineral Ikutan",
   "ipo_date": "23 September 2025",
   "share_price": "Rp 2.880",
   "total_shares": "1.618.023.300 lembar",
   "market_cap": "Rp 4,66 T",
-  "summary": "PT Merdeka Gold Resources Tbk adalah perusahaan holding yang bergerak di bidang pertambangan emas dan mineral. Perusahaan ini memiliki dan mengelola tambang emas di beberapa lokasi di Indonesia, dengan fokus pada penambangan, pengolahan, dan penjualan emas beserta mineral ikutannya.\\n\\nPerusahaan melayani pelanggan industri dan pasar komoditas global. Posisinya cukup kuat karena didukung cadangan emas yang sudah terbukti dan teknologi pengolahan yang teruji.\\n\\nIPO ini bertujuan memperluas kapasitas produksi dan eksplorasi tambang baru untuk meningkatkan cadangan emas jangka panjang.",
+  "summary": "PT Merdeka Gold Resources Tbk (EMAS) adalah perusahaan holding pertambangan emas yang berdiri pada 2022 dan berkedudukan di Jakarta. Perseroan mengelola operasi tambang emas melalui anak usahanya PT Merdeka Mining Investama, dengan dua proyek utama: Tambang Emas Pani di Gorontalo (kapasitas 250.000 oz/tahun) dan Tambang Emas Toka Tindung di Sulawesi Utara (100.000 oz/tahun).\\n\\nPerseroan menjual produksi emasnya kepada pembeli institusional global termasuk Metalor Technologies dan Heraeus. Dengan cadangan emas terbukti (proven reserves) sebesar 4,2 juta oz dan biaya produksi all-in sustaining cost (AISC) USD 950/oz — jauh di bawah harga pasar USD 2.400/oz — perusahaan memiliki margin keuntungan yang sangat tebal dan cadangan yang cukup untuk operasi 15+ tahun.\\n\\nDana IPO senilai Rp 4,66 T akan digunakan untuk mempercepat pembangunan fasilitas pengolahan baru di Pani dan eksplorasi blok-blok prospektif di Sulawesi. Target produksi naik dari 180.000 oz (2024) menjadi 400.000 oz pada 2027, menjadikan perseroan produsen emas terbesar ketiga di Indonesia.",
   "financial": {{
-    "currency": "IDR",
-    "years": ["2023"],
-    "raw_revenue_million": [850000],
+    "currency": "USD",
+    "years": ["2023", "2024"],
+    "raw_revenue_million": [180.5, 245.3],
     "revenue_growth": [
-      {{"year": "2023", "value": 0}}
+      {{"year": "2023", "value": 0}},
+      {{"year": "2024", "value": 35.9}}
     ],
     "gross_margin": [
-      {{"year": "2023", "value": 42.5}}
+      {{"year": "2023", "value": 48.2}},
+      {{"year": "2024", "value": 52.7}}
     ],
     "operating_margin": [
-      {{"year": "2023", "value": 18.3}}
+      {{"year": "2023", "value": 28.4}},
+      {{"year": "2024", "value": 33.1}}
     ],
     "ebitda_margin": [
-      {{"year": "2023", "value": null}}
+      {{"year": "2023", "value": 41.5}},
+      {{"year": "2024", "value": 46.8}}
     ],
     "net_profit_margin": [
-      {{"year": "2023", "value": 12.1}}
+      {{"year": "2023", "value": 18.9}},
+      {{"year": "2024", "value": 23.4}}
     ]
   }},
   "kpi": {{
-    "pe": "24.5x",
-    "pb": "3.2x",
-    "roe": "18.4%",
-    "der": "0.45x",
-    "eps": "Rp 25",
+    "pe": "18.5x",
+    "pb": "2.8x",
+    "roe": "15.2%",
+    "der": "0.38x",
+    "eps": "Rp 156",
     "mktcap": "Rp 4,66 T",
-    "ev_ebitda": "12.3x",
-    "cash_cost_per_oz": "USD 850/oz"
+    "ev_ebitda": "9.2x",
+    "aisc_per_oz": "USD 950/oz",
+    "reserve_life": "15 tahun"
   }},
   "use_of_funds": [
-    {{"category": "Ekspansi Kapasitas Tambang", "description": "Pembelian alat berat dan pembangunan fasilitas pengolahan emas di lokasi tambang utama untuk meningkatkan kapasitas produksi dari 50.000 oz menjadi 80.000 oz per tahun", "allocation": 60}},
-    {{"category": "Eksplorasi Cadangan Baru", "description": "Biaya eksplorasi dan pengeboran di blok-blok potensial yang sudah diidentifikasi untuk menambah cadangan terbukti perusahaan", "allocation": 30}},
-    {{"category": "Modal Kerja", "description": "Pembiayaan operasional sehari-hari termasuk pembelian bahan kimia, bahan bakar, dan gaji karyawan tambang", "allocation": 10}}
+    {{"category": "Pembangunan Fasilitas Pengolahan Pani Phase 2", "description": "Konstruksi pabrik pengolahan emas kapasitas 4 juta ton bijih/tahun di lokasi Tambang Pani, Gorontalo, untuk meningkatkan kapasitas produksi dari 120.000 oz menjadi 250.000 oz per tahun", "allocation": 55}},
+    {{"category": "Eksplorasi & Pengembangan Cadangan", "description": "Program pengeboran eksplorasi di 8 blok prospektif di Sulawesi dan Gorontalo untuk menambah cadangan terbukti yang saat ini 4,2 juta oz", "allocation": 30}},
+    {{"category": "Modal Kerja & Biaya Operasional", "description": "Pembiayaan kebutuhan operasional tambang, pembelian bahan kimia pengolahan, gaji 2.400 karyawan, dan cadangan likuiditas perseroan", "allocation": 15}}
   ],
-  "overall_risk_level": "High",
-  "overall_risk_reason": "Perusahaan sangat bergantung pada harga emas global yang volatile dan cadangan tambang terbatas, sehingga kelangsungan bisnis jangka panjang terancam jika harga emas turun tajam.",
+  "underwriter": {{
+    "lead": "PT Mandiri Sekuritas",
+    "others": ["PT BRI Danareksa Sekuritas", "PT Trimegah Sekuritas Indonesia Tbk"],
+    "type": "Kesanggupan Penuh (Full Commitment)",
+    "reputation": "Sangat baik — Mandiri Sekuritas adalah penjamin emisi terbesar Indonesia dengan portofolio 60+ IPO dalam 5 tahun terakhir termasuk BREN, AMMN, dan ADRO. Full commitment memastikan seluruh saham terjual meskipun pasar sedang volatile."
+  }},
+  "overall_risk_level": "Medium",
+  "overall_risk_reason": "Meskipun perusahaan memiliki cadangan emas besar dan margin tinggi, ketergantungan total pada harga emas global yang volatile dan fase konstruksi fasilitas baru yang belum selesai menciptakan risiko sedang yang perlu diperhatikan investor.",
   "risks": [
-    {{"level": "High", "title": "Risiko Fluktuasi Harga Emas", "desc": "Pendapatan perusahaan 100% bergantung pada harga emas global yang sangat volatile. Penurunan harga emas 20% bisa langsung memotong setengah laba bersih perusahaan"}},
-    {{"level": "High", "title": "Risiko Cadangan Tambang Terbatas", "desc": "Jika eksplorasi gagal menemukan cadangan baru, umur tambang yang ada hanya tersisa 8-10 tahun sehingga pendapatan jangka panjang terancam"}},
-    {{"level": "High", "title": "Risiko Perizinan Tambang", "desc": "Pencabutan atau tidak diperpanjangnya izin konsesi tambang dapat menghentikan seluruh operasional perusahaan secara tiba-tiba"}}
+    {{"level": "Medium", "title": "Ketergantungan pada Harga Emas Global", "desc": "Seluruh pendapatan perusahaan berasal dari penjualan emas. Jika harga emas turun dari USD 2.400 ke USD 1.800/oz, laba bersih bisa turun lebih dari 60% karena biaya produksi tetap."}},
+    {{"level": "Medium", "title": "Risiko Konstruksi Fasilitas Pani Phase 2", "desc": "Pembangunan pabrik senilai USD 180 juta masih berlangsung dan dijadwalkan selesai 2026. Keterlambatan atau pembengkakan biaya konstruksi bisa menunda peningkatan produksi yang menjadi basis valuasi IPO."}},
+    {{"level": "Medium", "title": "Ketergantungan pada Izin Lingkungan & ESDM", "desc": "Operasi tambang sangat bergantung pada perpanjangan izin dari Kementerian ESDM dan KLHK. Pengetatan regulasi lingkungan hidup pasca-insiden tambang di daerah lain berpotensi mempersulit proses perpanjangan izin."}}
   ],
   "benefits": [
-    {{"title": "Cadangan Emas Terbukti yang Besar", "desc": "Perusahaan memiliki cadangan emas terbukti sebesar 1,2 juta oz, cukup untuk operasi 10+ tahun ke depan tanpa eksplorasi tambahan"}},
-    {{"title": "Harga Emas Sedang di Level Tertinggi Sepanjang Masa", "desc": "Emas diperdagangkan di atas USD 2.000/oz, memberikan margin keuntungan yang sangat tebal bagi produsen emas berbiaya rendah"}},
-    {{"title": "Cash Cost Kompetitif", "desc": "Biaya produksi USD 850/oz jauh di bawah harga pasar, memberikan buffer keuntungan yang kuat meski harga emas turun"}},
-    {{"title": "Manajemen Berpengalaman di Sektor Tambang", "desc": "Tim manajemen rata-rata 15+ tahun pengalaman di industri pertambangan, dengan track record operasi tambang yang efisien"}},
-    {{"title": "Didukung Penjamin Emisi Terpercaya", "desc": "IPO ini dijamin penuh oleh Mandiri Sekuritas — penjamin emisi terbesar Indonesia yang telah menangani 50+ IPO besar seperti BREN, GOTO, TLKM rights issue. Full commitment berarti seluruh saham pasti terjual"}}
-  ],
-  "underwriters": [
-    {{"name": "PT Mandiri Sekuritas", "role": "Penjamin Pelaksana Emisi Efek", "portion_pct": 70, "commitment_type": "Kesanggupan Penuh"}},
-    {{"name": "PT BRI Danareksa Sekuritas", "role": "Penjamin Emisi Efek", "portion_pct": 30, "commitment_type": "Kesanggupan Penuh"}}
+    {{"title": "Cadangan Emas Terbukti 4,2 Juta Oz — Visibilitas 15 Tahun", "desc": "Dengan cadangan terbukti terbesar di antara emiten tambang emas yang IPO dalam 5 tahun terakhir, investor mendapat kepastian arus kas hingga 2040+."}},
+    {{"title": "Margin Keuntungan Tertinggi di Industri: AISC USD 950/oz vs Harga USD 2.400/oz", "desc": "Spread keuntungan USD 1.450/oz memberikan buffer sangat tebal. Bahkan jika harga emas turun 30%, perusahaan masih sangat profitable."}},
+    {{"title": "Pertumbuhan Produksi 120% dalam 3 Tahun", "desc": "Target produksi naik dari 180.000 oz (2024) ke 400.000 oz (2027), menjadikan ini salah satu growth story terkuat di sektor pertambangan Indonesia."}},
+    {{"title": "Didukung Penjamin Emisi Tier-1: Mandiri Sekuritas + BRI Danareksa", "desc": "Full commitment dari dua penjamin terbesar Indonesia memastikan IPO pasti sukses. Track record keduanya: semua IPO yang ditangani berhasil mencapai harga penawaran."}},
+    {{"title": "Harga Emas di Level Rekor — Momentum Investasi Terbaik", "desc": "Emas diperdagangkan di USD 2.400/oz, level tertinggi sepanjang sejarah. Investor yang masuk di IPO ini mendapat exposure ke komoditas yang sedang berada di puncak siklus bullish."}}
   ]
 }}"""
 
     response = client.chat.completions.create(
         model="gemini/gemini-2.5-flash",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
+        temperature=0.1,
         max_tokens=16000
     )
 
     raw = response.choices[0].message.content.strip()
 
-    # ── Bersihkan markdown/formatting ──────────────────────────────────
-    # Hapus ```json ... ``` wrapper
+    # Bersihkan markdown
     if "```" in raw:
         parts = raw.split("```")
         for part in parts:
@@ -253,41 +242,28 @@ OUTPUT JSON (struktur persis ini):
                 raw = p
                 break
 
-    # Ambil hanya bagian JSON { ... }
     start = raw.find("{")
     end   = raw.rfind("}") + 1
     if start != -1 and end > start:
         raw = raw[start:end]
 
-    # ── Coba parse langsung ─────────────────────────────────────────────
+    # Fix 1: trailing comma
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
         pass
 
-    # ── Fix 1: Hapus trailing comma sebelum } atau ] ────────────────────
-    import re
     raw_fixed = re.sub(r',\s*([}\]])', r'\1', raw)
     try:
         return json.loads(raw_fixed)
     except json.JSONDecodeError:
         pass
 
-    # ── Fix 2: Pakai json5 / ast literal eval sebagai fallback ──────────
-    try:
-        import ast
-        # Ganti true/false/null Python-style
-        raw_py = raw_fixed.replace('true', 'True').replace('false', 'False').replace('null', 'None')
-        return ast.literal_eval(raw_py)
-    except Exception:
-        pass
-
-    # ── Fix 3: Potong sampai JSON valid terakhir ─────────────────────────
+    # Fix 2: potong sampai valid
     for i in range(len(raw_fixed), 0, -1):
         try:
             return json.loads(raw_fixed[:i])
         except json.JSONDecodeError:
             continue
 
-    # ── Fix 4: Return partial data daripada crash ────────────────────────
-    raise ValueError(f"Tidak bisa parse JSON dari Gemini. Raw output (1000 char): {raw[:1000]}")
+    raise ValueError(f"Tidak bisa parse JSON. Output (500 char): {raw[:500]}")
