@@ -45,25 +45,52 @@ Paragraf 3 — Tujuan IPO: Dana dipakai untuk apa, target ke depan, visi pertumb
 Pisahkan paragraf dengan \\n\\n. WAJIB spesifik dengan data angka dari prospektus.
 
 ===================================================
-BAGIAN 3: DATA KEUANGAN — WAJIB AMBIL DARI TABEL ASLI
+BAGIAN 3: DATA KEUANGAN — BACA DARI TABEL AKTUAL
 ===================================================
-LANGKAH WAJIB:
-1. Cari tabel dengan judul: "Ikhtisar Data Keuangan Penting", "Laporan Laba Rugi Konsolidasian", "Ringkasan Laporan Keuangan"
-2. Catat SEMUA tahun yang ada di tabel (bisa 1-4 tahun)
-3. Catat nilai AKTUAL dari tabel: Total Pendapatan/Revenue, Laba Kotor, Laba Usaha, Laba Bersih
-4. Hitung setiap metrik dari angka yang sudah kamu catat
 
-PERINGATAN KERAS:
-- DILARANG menggunakan angka yang sama untuk perusahaan berbeda
-- DILARANG mengarang angka — jika tidak ada di tabel, isi null
-- HARUS berbeda untuk setiap perusahaan yang dianalisis
-- Jika hanya 1 tahun data: revenue_growth = 0, sisanya hitung dari angka 1 tahun itu
+LANGKAH 1 — TEMUKAN TABEL:
+Cari di dokumen dengan kata kunci (urutan prioritas):
+→ "Ikhtisar Data Keuangan Penting"
+→ "Laporan Laba Rugi Konsolidasian" / "Consolidated Statements of Profit or Loss"
+→ "Ringkasan Laporan Keuangan"
+→ "Informasi Keuangan Ringkas"
+→ Tabel apapun yang berisi: Pendapatan, Laba Kotor, Laba Bersih
 
-Mata uang: IDR atau USD — tulis apa adanya di "currency"
+LANGKAH 2 — CATAT ANGKA MENTAH:
+Dari tabel yang ditemukan, catat PERSIS:
+- Tahun: (misal 2022, 2023, 2024)
+- Total Pendapatan / Total Revenue / Net Revenue tiap tahun
+- Laba Kotor / Gross Profit tiap tahun
+- Laba Usaha / Operating Profit tiap tahun
+- Laba Bersih / Net Profit tiap tahun
+- Mata uang: IDR (Rupiah) atau USD (Dolar)
 
-CARA HITUNG dari angka AKTUAL di tabel:
-PENTING: Jika hanya ada 1 tahun data → revenue_growth = 0 untuk tahun itu
-PENTING: Jika data tidak ada → isi null, JANGAN buat angka fiktif
+LANGKAH 3 — HITUNG METRIK (dari angka di langkah 2):
+A) Revenue Growth % = ((Rev_N - Rev_(N-1)) / |Rev_(N-1)|) × 100
+   Tahun PERTAMA yang ada di dokumen = 0 (tidak ada pembanding sebelumnya)
+
+B) Gross Margin % = (Laba Kotor / Pendapatan) × 100
+
+C) Operating Margin % = (Laba Usaha / Pendapatan) × 100
+   BOLEH negatif jika perusahaan masih rugi operasi
+
+D) EBITDA Margin % = ((Laba Usaha + Depresiasi + Amortisasi) / Pendapatan) × 100
+   Jika D&A tidak ada → null
+
+E) Net Profit Margin % = (Laba Bersih / Pendapatan) × 100
+   BOLEH negatif jika masih rugi bersih
+
+FORMAT OUTPUT:
+- Semua nilai: angka desimal TANPA simbol %, TANPA koma ribuan
+- Benar: 34.56 | Salah: "34.56%" atau 34,56
+- Data tidak ada: null (BUKAN 0, BUKAN "")
+
+LARANGAN KERAS:
+❌ JANGAN pakai angka yang sama untuk perusahaan berbeda
+❌ JANGAN mengarang angka yang tidak ada di dokumen
+❌ JANGAN menggunakan angka dari contoh JSON di bawah ini
+
+Mata uang: tulis "IDR" atau "USD" sesuai yang ada di laporan keuangan
 A) Revenue Growth (%) = ((Pendapatan_N - Pendapatan_N-1) / |Pendapatan_N-1|) × 100
    → Tahun pertama yang tersedia = 0 (tidak ada pembanding)
    → Contoh: Rev 2023=500M, Rev 2024=750M → Growth 2024 = ((750-500)/500)×100 = 50.0
@@ -87,46 +114,71 @@ FORMAT: Semua nilai ANGKA DESIMAL tanpa simbol %, tanpa koma ribuan.
 Contoh BENAR: 34.56 | Contoh SALAH: "34.56%" atau "34,56"
 
 ===================================================
-BAGIAN 4: KPI SPESIFIK INDUSTRI
+BAGIAN 4: KEY PERFORMANCE INDICATORS (KPI)
 ===================================================
-Pilih 4-6 KPI yang PALING RELEVAN dengan industri perusahaan ini:
+Hitung TEPAT 5 KPI berikut dari data di prospektus:
 
-Pertambangan/Energi: P/E, EV/EBITDA, Cash Cost per unit, Reserve Life (tahun), DER
-Perbankan/Keuangan: P/E, P/B, NIM, NPL ratio, CAR, ROA, ROE
-Properti/Konstruksi: P/E, P/B, NAV discount, DER, Pre-sales coverage
-Teknologi/Digital: P/E, P/S, Revenue Growth, Gross Margin, Burn Rate
-Manufaktur: P/E, P/B, ROIC, Asset Turnover, Inventory Days
-Retail/Consumer: P/E, EV/EBITDA, Same-store growth, Revenue per outlet
-Infrastruktur: P/E, EV/EBITDA, IRR, Debt Coverage Ratio, Backlog
+1. P/E Ratio (pe):
+   = Harga Penawaran / EPS (Laba Per Saham)
+   EPS = Laba Bersih / Total Saham Beredar
+   Jika EPS negatif → tulis "N/A (Rugi)"
+   Format: "18.5x"
 
-Hitung P/E = Harga IPO / EPS terbaru (jika EPS tersedia di prospektus)
-Hitung P/B = Harga IPO / (Total Ekuitas / Total Saham)
-Selalu sertakan: pe, pb, roe, der, eps, mktcap
+2. P/B Ratio (pb):
+   = Harga Penawaran / (Total Ekuitas / Total Saham Beredar)
+   Nilai Buku Per Saham = Total Ekuitas ÷ Total Saham
+   Format: "2.3x"
+
+3. ROE / Return on Equity (roe):
+   = (Laba Bersih / Total Ekuitas) × 100
+   Format: "15.2%"
+
+4. D/E Ratio (der):
+   = Total Liabilitas / Total Ekuitas
+   Format: "0.45x"
+
+5. EPS / Laba Per Saham (eps):
+   = Laba Bersih / Total Saham Beredar
+   Tulis dengan mata uang aslinya
+   Format IDR: "Rp 156" | Format USD: "USD 0.023"
+
+Semua nilai HARUS dihitung dari angka aktual di prospektus.
+Jika data tidak tersedia → tulis "N/A"
 
 ===================================================
 BAGIAN 5: PENGGUNAAN DANA IPO — WAJIB DITEMUKAN
 ===================================================
-Cari di seluruh dokumen dengan kata kunci:
-- "Rencana Penggunaan Dana"
-- "Penggunaan Dana Hasil Penawaran Umum"  
-- "Penggunaan Dana IPO"
-- "Alokasi Dana"
-- Tabel yang menyebutkan persentase penggunaan dana
 
-WAJIB DIISI — jangan biarkan kosong []:
-- Ekstrak SETIAP alokasi dana yang disebutkan dengan persentase atau nilai
-- Jika tidak ada persentase, hitung sendiri dari nilai dana yang disebutkan
-- Jumlah semua allocation HARUS = 100
+LANGKAH 1 — CARI DI SELURUH DOKUMEN:
+Gunakan kata kunci berikut (cek SEMUA, jangan hanya satu):
+→ "Rencana Penggunaan Dana"
+→ "Penggunaan Dana Hasil Penawaran Umum"
+→ "Penggunaan Dana Hasil IPO"
+→ "Tujuan Penggunaan Dana"
+→ "Alokasi Dana"
+→ "Dana yang Diperoleh dari Penawaran"
+→ "Proceeds from the Offering" (jika dokumen bilingual)
+→ Cari tabel atau daftar berisi % atau nilai Rp/USD dengan keterangan tujuan
+
+LANGKAH 2 — EKSTRAK SETIAP ALOKASI:
+- Catat SETIAP item alokasi yang disebutkan beserta nilai atau persentasenya
+- Jika nilai dalam Rp: hitung % dari total dana bersih IPO
+- Jika sudah dalam %: gunakan langsung
+- Jumlah HARUS = 100 (bulatkan jika perlu)
 - Minimal 2 item, maksimal 5 item
 
-description HARUS SPESIFIK (bukan generik):
-- BAIK: "Pembelian 3 kapal tanker 50.000 DWT senilai Rp 450 M untuk ekspansi armada"
-- BURUK: "Pengembangan bisnis" atau "Modal kerja umum"
+LANGKAH 3 — TULIS DESKRIPSI SPESIFIK:
+BAIK: "Penyetoran modal ke PT Krakatau Chandra Energi untuk pembangunan pembangkit listrik 150 MW di kawasan industri Cilegon senilai Rp 850 M"
+BURUK: "Pengembangan bisnis" atau "Modal kerja"
 
-Jika sulit menemukan persentase tepat, estimasi berdasarkan konteks kalimat:
-- "sebagian besar" → 60-70%
-- "sebagian" → 30-40%
-- "sisanya" → sisa dari 100%
+LANGKAH 4 — JIKA TIDAK DITEMUKAN EKSPLISIT:
+Cari kalimat seperti:
+- "Dana IPO akan digunakan untuk..." → ekstrak tujuannya
+- "Perseroan berencana menggunakan dana untuk..." → ekstrak itemnya
+- Estimasi % berdasarkan proporsi yang disebutkan:
+  "sebagian besar (±70%) untuk X, sisanya (±30%) untuk Y"
+
+LARANGAN: JANGAN biarkan use_of_funds = [] kosong
 
 ===================================================
 BAGIAN 6: PENJAMIN EMISI EFEK

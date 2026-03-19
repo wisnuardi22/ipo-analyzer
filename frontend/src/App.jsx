@@ -1523,81 +1523,57 @@ export default function App() {
               </div>
             </div>
 
-            {/* ── KPI CARDS ── */}
+            {/* ── KPI CARDS — 5 item tetap ── */}
             <div className="mb-8">
               <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
                 {l.dash.kpi}
               </h3>
-              {(() => {
-                const extraColors = [
-                  "text-teal-600 dark:text-teal-400",
-                  "text-rose-600 dark:text-rose-400",
-                  "text-indigo-600 dark:text-indigo-400",
-                  "text-amber-600 dark:text-amber-400",
-                ];
-                const stdKpis = [
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                {[
                   {
                     label: l.dash.pe,
                     val: D.kpi.pe,
                     color: "text-blue-600 dark:text-blue-400",
+                    bg: "bg-blue-50 dark:bg-blue-900/20",
                   },
                   {
                     label: l.dash.pb,
                     val: D.kpi.pb,
                     color: "text-purple-600 dark:text-purple-400",
+                    bg: "bg-purple-50 dark:bg-purple-900/20",
                   },
                   {
                     label: l.dash.roe,
                     val: D.kpi.roe,
                     color: "text-emerald-600 dark:text-emerald-400",
+                    bg: "bg-emerald-50 dark:bg-emerald-900/20",
                   },
                   {
                     label: l.dash.der,
                     val: D.kpi.der,
                     color: "text-orange-600 dark:text-orange-400",
+                    bg: "bg-orange-50 dark:bg-orange-900/20",
                   },
                   {
                     label: l.dash.eps,
                     val: D.kpi.eps,
                     color: "text-cyan-600 dark:text-cyan-400",
+                    bg: "bg-cyan-50 dark:bg-cyan-900/20",
                   },
-                  {
-                    label: l.dash.mktcap,
-                    val: D.kpi.mktcap,
-                    color: "text-pink-600 dark:text-pink-400",
-                  },
-                ];
-                const skipKeys = ["pe", "pb", "roe", "der", "eps", "mktcap"];
-                const extraKpis = Object.entries(D.kpi)
-                  .filter(([k, v]) => !skipKeys.includes(k) && v)
-                  .map(([k, v], i) => ({
-                    label: k.replace(/_/g, " ").toUpperCase(),
-                    val: v,
-                    color: extraColors[i % extraColors.length],
-                  }));
-                const allKpis = [...stdKpis, ...extraKpis];
-                const gridClass =
-                  allKpis.length <= 6
-                    ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-6"
-                    : "grid-cols-2 md:grid-cols-3 lg:grid-cols-4";
-                return (
-                  <div className={`grid ${gridClass} gap-4`}>
-                    {allKpis.map((k, i) => (
-                      <div
-                        key={i}
-                        className="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-200 dark:border-gray-700 shadow-sm text-center"
-                      >
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                          {k.label}
-                        </p>
-                        <p className={`text-lg font-bold ${k.color}`}>
-                          {k.val}
-                        </p>
-                      </div>
-                    ))}
+                ].map((k, i) => (
+                  <div
+                    key={i}
+                    className={`${k.bg} rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm text-center`}
+                  >
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 font-medium">
+                      {k.label}
+                    </p>
+                    <p className={`text-xl font-bold ${k.color}`}>
+                      {k.val || "—"}
+                    </p>
                   </div>
-                );
-              })()}
+                ))}
+              </div>
             </div>
 
             {/* ── FINANCIAL CHARTS (2x2 grid) ── */}
