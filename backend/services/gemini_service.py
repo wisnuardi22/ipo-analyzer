@@ -54,7 +54,9 @@ PENTING: Data keuangan ini WAJIB berbeda antar perusahaan. Baca dan hitung dari 
 Tahun yang tersedia: bisa 1, 2, 3, atau 4 tahun — gunakan SEMUA yang ada di dokumen.
 Mata uang: IDR atau USD — tulis apa adanya di field "currency".
 
-CARA HITUNG (gunakan angka dari tabel, bukan estimasi):
+CARA HITUNG (gunakan angka dari tabel, HARUS berbeda tiap perusahaan):
+PENTING: Jika hanya ada 1 tahun data → revenue_growth = 0 untuk tahun itu, isi null untuk D&A jika tidak ada.
+PENTING: Jika data tidak ada sama sekali → isi null, JANGAN buat angka fiktif.
 A) Revenue Growth (%) = ((Pendapatan_N - Pendapatan_N-1) / |Pendapatan_N-1|) × 100
    → Tahun pertama yang tersedia = 0 (tidak ada pembanding)
    → Contoh: Rev 2023=500M, Rev 2024=750M → Growth 2024 = ((750-500)/500)×100 = 50.0
@@ -95,19 +97,29 @@ Hitung P/B = Harga IPO / (Total Ekuitas / Total Saham)
 Selalu sertakan: pe, pb, roe, der, eps, mktcap
 
 ===================================================
-BAGIAN 5: PENGGUNAAN DANA IPO
+BAGIAN 5: PENGGUNAAN DANA IPO — WAJIB DITEMUKAN
 ===================================================
-Baca bagian "Rencana Penggunaan Dana" atau "Penggunaan Dana Hasil Penawaran Umum" dengan SANGAT TELITI.
+Cari di seluruh dokumen dengan kata kunci:
+- "Rencana Penggunaan Dana"
+- "Penggunaan Dana Hasil Penawaran Umum"  
+- "Penggunaan Dana IPO"
+- "Alokasi Dana"
+- Tabel yang menyebutkan persentase penggunaan dana
 
-WAJIB:
-- Ekstrak SETIAP alokasi dana yang disebutkan
-- Hitung persentase dari total dana bersih
+WAJIB DIISI — jangan biarkan kosong []:
+- Ekstrak SETIAP alokasi dana yang disebutkan dengan persentase atau nilai
+- Jika tidak ada persentase, hitung sendiri dari nilai dana yang disebutkan
 - Jumlah semua allocation HARUS = 100
-- description: penjelasan SPESIFIK dan DETAIL (bukan generik)
-  Contoh BAIK: "Pembelian 3 unit kapal tanker kapasitas 50.000 DWT untuk ekspansi armada logistik"
-  Contoh BURUK: "Pengembangan bisnis" atau "Modal kerja"
+- Minimal 2 item, maksimal 5 item
 
-Minimal 2 item, maksimal 5 item.
+description HARUS SPESIFIK (bukan generik):
+- BAIK: "Pembelian 3 kapal tanker 50.000 DWT senilai Rp 450 M untuk ekspansi armada"
+- BURUK: "Pengembangan bisnis" atau "Modal kerja umum"
+
+Jika sulit menemukan persentase tepat, estimasi berdasarkan konteks kalimat:
+- "sebagian besar" → 60-70%
+- "sebagian" → 30-40%
+- "sisanya" → sisa dari 100%
 
 ===================================================
 BAGIAN 6: PENJAMIN EMISI EFEK
