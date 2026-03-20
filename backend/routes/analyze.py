@@ -138,6 +138,7 @@ def run_analysis(analysis_id: int, body: AnalyzeRequest = AnalyzeRequest(), db: 
             "underwriter":          underwriter,
             "overall_risk_level":   overall_risk_level,
             "overall_risk_reason":  overall_risk_reason,
+            "lang":                 lang,
         })
 
         db.commit()
@@ -167,21 +168,31 @@ def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
     risks     = json.loads(analysis.risks)          if analysis.risks          else []
     benefits  = json.loads(analysis.benefits)       if analysis.benefits       else []
 
-    # Ambil overall risk dari Gemini (lebih akurat) atau hitung dari risks
     stored_level  = ipo.get("overall_risk_level", "")
     stored_reason = ipo.get("overall_risk_reason", "")
+    lang          = ipo.get("lang", "ID").upper()
+    is_en         = lang == "EN"
 
-    if stored_level in ["HIGH", "MEDIUM", "LOW"]:
+    # Label risiko mengikuti bahasa
+    label_map = {
+        "HIGH":   "High Risk"      if is_en else "Risiko Tinggi",
+        "MEDIUM": "Medium Risk"    if is_en else "Risiko Sedang",
+        "LOW":    "Low Risk"       if is_en else "Risiko Rendah",
+    }
+    color_map = {"HIGH": "#EF4444", "MEDIUM": "#F59E0B", "LOW": "#22C55E"}
+
+    if stored_level in label_map:
         risk_level = stored_level
-        risk_label = {"HIGH": "Risiko Tinggi", "MEDIUM": "Risiko Sedang", "LOW": "Risiko Rendah"}[stored_level]
-        risk_color = {"HIGH": "#EF4444", "MEDIUM": "#F59E0B", "LOW": "#22C55E"}[stored_level]
+        risk_label = label_map[stored_level]
+        risk_color = color_map[stored_level]
     else:
-        risk_level, risk_label, risk_color = _resolve_overall_risk(risks)
+        risk_level, risk_label, risk_color = _resolve_overall_risk(risks, is_en)
 
     return {
         "id":                   analysis.id,
         "company_name":         analysis.company_name,
         "created_at":           str(analysis.created_at),
+        # Root level — frontend baca langsung dari sini
         "ticker":               ipo.get("ticker", ""),
         "sector":               ipo.get("sector", ""),
         "ipo_date":             ipo.get("ipo_date", ""),
@@ -205,15 +216,15 @@ def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
     }
 
 
-def _resolve_overall_risk(risks: list) -> tuple[str, str, str]:
+def _resolve_overall_risk(risks: list, is_en: bool = False) -> tuple[str, str, str]:
     priority = {"high": 3, "medium": 2, "low": 1}
     highest  = 0
     for r in risks:
         lvl     = str(r.get("level", "")).lower()
         highest = max(highest, priority.get(lvl, 0))
     if highest >= 3:
-        return "HIGH",   "Risiko Tinggi", "#EF4444"
+        return "HIGH",   "High Risk"   if is_en else "Risiko Tinggi", "#EF4444"
     elif highest == 2:
-        return "MEDIUM", "Risiko Sedang", "#F59E0B"
+        return "MEDIUM", "Medium Risk" if is_en else "Risiko Sedang", "#F59E0B"
     else:
-        return "LOW",    "Risiko Rendah", "#22C55E"
+        return "LOW",    "Low Risk"    if is_en else "Risiko Rendah", "#22C55E"

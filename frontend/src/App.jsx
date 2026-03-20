@@ -737,24 +737,26 @@ export default function App() {
       const d = res.data;
       // DEBUG lightweight
       console.log(
-        "API OK - company:",
+        "API OK:",
         d.company_name,
+        "| kpi:",
+        d.kpi,
         "| use_of_funds:",
-        d.ipo_details?.use_of_funds?.length,
-        "items | financial years:",
+        d.use_of_funds?.length,
+        "| financial years:",
         d.financial?.years,
       );
 
-      // Ticker: dari hasil analisis backend
+      // Ticker
       const ticker = d.ticker || d.ipo_details?.ticker || "";
 
-      // Helper: pastikan nilai persen sudah angka, bukan string
+      // Helper: angka dari string/persen
       const toNum = (v) =>
         v === null || v === undefined
           ? null
           : parseFloat(String(v).replace("%", ""));
 
-      // Normalisasi array financial dari Gemini — lebih permisif
+      // Normalisasi array financial
       const normFinancial = (arr) => {
         if (!arr || !Array.isArray(arr) || arr.length === 0) return null;
         const result = arr
@@ -766,86 +768,72 @@ export default function App() {
         return result.length > 0 ? result : null;
       };
 
-      // ── trend analysis helper ──
       const trendTag = (arr) => {
         if (!arr || arr.length < 2) return null;
         const valid = arr.filter((x) => x.value !== null);
         if (valid.length < 2) return null;
-        const first = valid[0].value;
-        const last = valid[valid.length - 1].value;
-        const diff = last - first;
+        const diff = valid[valid.length - 1].value - valid[0].value;
         if (diff > 2) return "up";
         if (diff < -2) return "down";
         return "stable";
       };
 
-      // ── financial summary for each chart ──
-      const chartSummary = (arr, label) => {
-        if (!arr || arr.length === 0) return "";
-        const valid = arr.filter((x) => x.value !== null && x.value !== 0);
-        if (valid.length === 0) return "";
-        const last = valid[valid.length - 1];
-        const avg = (
-          valid.reduce((s, x) => s + x.value, 0) / valid.length
-        ).toFixed(1);
-        return `Latest: ${last.value?.toFixed(1)}% (${last.year}) · Avg: ${avg}%`;
-      };
+      // Ambil kpi & use_of_funds dari root (prioritas) atau ipo_details (fallback)
+      const kpiData =
+        d.kpi && Object.keys(d.kpi).length > 0
+          ? d.kpi
+          : d.ipo_details?.kpi || {};
+      const uofData =
+        d.use_of_funds?.length > 0
+          ? d.use_of_funds
+          : d.ipo_details?.use_of_funds || [];
+      const finData = d.financial || {};
 
       const mapped = {
         company: {
-          name: d.company_name || MOCK.company.name,
+          name: d.company_name || "",
           ticker,
           sector: d.sector || d.ipo_details?.sector || "",
-          description: d.summary || MOCK.company.description,
-          ipoDate: d.ipo_details?.ipo_date || MOCK.company.ipoDate,
-          offerPrice:
-            _fmtPrice(d.ipo_details?.share_price) || MOCK.company.offerPrice,
+          description: d.summary || "",
+          ipoDate: d.ipo_date || d.ipo_details?.ipo_date || "",
+          offerPrice: _fmtPrice(d.share_price || d.ipo_details?.share_price),
           currentPrice: d.current_price || d.ipo_details?.current_price || "",
-          totalShares:
-            _fmtShares(d.ipo_details?.total_shares) || MOCK.company.totalShares,
-          marketCap:
-            _fmtMarketCap(d.ipo_details?.market_cap || d.market_cap) ||
-            MOCK.company.marketCap,
-          currency: d.financial?.currency || "IDR",
+          totalShares: _fmtShares(
+            d.total_shares || d.ipo_details?.total_shares,
+          ),
+          marketCap: _fmtMarketCap(d.market_cap || d.ipo_details?.market_cap),
+          currency: finData.currency || "IDR",
         },
         kpi: {
-          pe: d.ipo_details?.kpi?.pe || MOCK.kpi.pe,
-          pb: d.ipo_details?.kpi?.pb || MOCK.kpi.pb,
-          roe: d.ipo_details?.kpi?.roe || MOCK.kpi.roe,
-          der: d.ipo_details?.kpi?.der || MOCK.kpi.der,
-          eps: d.ipo_details?.kpi?.eps || MOCK.kpi.eps,
-          mktcap: d.ipo_details?.market_cap || d.market_cap || MOCK.kpi.mktcap,
-          // KPI tambahan spesifik industri dari AI
-          ...Object.fromEntries(
-            Object.entries(d.ipo_details?.kpi || {}).filter(
-              ([k]) => !["pe", "pb", "roe", "der", "eps", "mktcap"].includes(k),
-            ),
-          ),
+          pe: kpiData.pe || "N/A",
+          pb: kpiData.pb || "N/A",
+          roe: kpiData.roe || "N/A",
+          der: kpiData.der || "N/A",
+          eps: kpiData.eps || "N/A",
+          mktcap:
+            kpiData.market_cap ||
+            d.market_cap ||
+            d.ipo_details?.market_cap ||
+            "N/A",
         },
         financialTrends: {
-          revenue: normFinancial(d.financial?.revenue_growth) || [],
-          grossMargin: normFinancial(d.financial?.gross_margin) || [],
-          operatingMargin: normFinancial(d.financial?.operating_margin) || [],
-          ebitdaMargin: normFinancial(d.financial?.ebitda_margin) || [],
+          revenue: normFinancial(finData.revenue_growth) || [],
+          grossMargin: normFinancial(finData.gross_margin) || [],
+          operatingMargin: normFinancial(finData.operating_margin) || [],
+          ebitdaMargin: normFinancial(finData.ebitda_margin) || [],
         },
-        // pre-computed trend tags
         trendTags: {
-          revenue: trendTag(normFinancial(d.financial?.revenue_growth)),
-          grossMargin: trendTag(normFinancial(d.financial?.gross_margin)),
-          operatingMargin: trendTag(
-            normFinancial(d.financial?.operating_margin),
-          ),
-          ebitdaMargin: trendTag(normFinancial(d.financial?.ebitda_margin)),
+          revenue: trendTag(normFinancial(finData.revenue_growth)),
+          grossMargin: trendTag(normFinancial(finData.gross_margin)),
+          operatingMargin: trendTag(normFinancial(finData.operating_margin)),
+          ebitdaMargin: trendTag(normFinancial(finData.ebitda_margin)),
         },
-        useOfProceeds:
-          (d.use_of_funds || d.ipo_details?.use_of_funds)?.map((x, i) => ({
-            name: x.category || x.name || "",
-            value: x.allocation || x.value || 0,
-            desc: x.description || "",
-            color: ["#10B981", "#3B82F6", "#F59E0B", "#8B5CF6", "#EC4899"][
-              i % 5
-            ],
-          })) || [],
+        useOfProceeds: uofData.map((x, i) => ({
+          name: x.category || x.name || "",
+          value: x.allocation || x.value || 0,
+          desc: x.description || "",
+          color: ["#10B981", "#3B82F6", "#F59E0B", "#8B5CF6", "#EC4899"][i % 5],
+        })),
         riskFactors: d.risks || [],
         potentialBenefits: d.benefits || [],
         riskLevel: d.risk_level || _computeRiskLevel(d.risks || []),
