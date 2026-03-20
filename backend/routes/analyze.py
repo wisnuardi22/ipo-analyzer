@@ -143,6 +143,8 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
         }
 
     except Exception as e:
+        import traceback
+        logger.error(f"Error analyze {analysis_id}: {traceback.format_exc()}")
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Gagal menganalisis: {str(e)}")
 
