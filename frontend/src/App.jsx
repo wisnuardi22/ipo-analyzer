@@ -735,8 +735,12 @@ export default function App() {
         `${API_BASE}/analysis/${up.data.analysis_id}`,
       );
       const d = res.data;
-      // Ticker: HANYA dari hasil search market_data (ticker dari API), bukan dari prospektus
-      const ticker = d.ticker || d.ipo_details?.ticker || "";
+      // DEBUG: lihat raw response dari backend
+      console.log("=== RAW API RESPONSE ===", JSON.stringify(d, null, 2));
+      console.log("use_of_funds:", d.use_of_funds);
+      console.log("ipo_details.use_of_funds:", d.ipo_details?.use_of_funds);
+      console.log("financial:", d.financial);
+      console.log("kpi:", d.ipo_details?.kpi);
 
       // Helper: pastikan nilai persen sudah angka, bukan string
       const toNum = (v) =>
@@ -813,37 +817,19 @@ export default function App() {
           ),
         },
         financialTrends: {
-          revenue:
-            normFinancial(d.financial?.revenue_growth) ||
-            MOCK.financialTrends.revenue,
-          grossMargin:
-            normFinancial(d.financial?.gross_margin) ||
-            MOCK.financialTrends.grossMargin,
-          operatingMargin:
-            normFinancial(d.financial?.operating_margin) ||
-            MOCK.financialTrends.operatingMargin,
-          ebitdaMargin:
-            normFinancial(d.financial?.ebitda_margin) ||
-            MOCK.financialTrends.ebitdaMargin,
+          revenue: normFinancial(d.financial?.revenue_growth) || null,
+          grossMargin: normFinancial(d.financial?.gross_margin) || null,
+          operatingMargin: normFinancial(d.financial?.operating_margin) || null,
+          ebitdaMargin: normFinancial(d.financial?.ebitda_margin) || null,
         },
         // pre-computed trend tags
         trendTags: {
-          revenue: trendTag(
-            normFinancial(d.financial?.revenue_growth) ||
-              MOCK.financialTrends.revenue,
-          ),
-          grossMargin: trendTag(
-            normFinancial(d.financial?.gross_margin) ||
-              MOCK.financialTrends.grossMargin,
-          ),
+          revenue: trendTag(normFinancial(d.financial?.revenue_growth)),
+          grossMargin: trendTag(normFinancial(d.financial?.gross_margin)),
           operatingMargin: trendTag(
-            normFinancial(d.financial?.operating_margin) ||
-              MOCK.financialTrends.operatingMargin,
+            normFinancial(d.financial?.operating_margin),
           ),
-          ebitdaMargin: trendTag(
-            normFinancial(d.financial?.ebitda_margin) ||
-              MOCK.financialTrends.ebitdaMargin,
-          ),
+          ebitdaMargin: trendTag(normFinancial(d.financial?.ebitda_margin)),
         },
         useOfProceeds:
           (d.use_of_funds || d.ipo_details?.use_of_funds)?.map((x, i) => ({
@@ -853,9 +839,9 @@ export default function App() {
             color: ["#10B981", "#3B82F6", "#F59E0B", "#8B5CF6", "#EC4899"][
               i % 5
             ],
-          })) || MOCK.useOfProceeds,
-        riskFactors: d.risks || MOCK.riskFactors,
-        potentialBenefits: d.benefits || MOCK.potentialBenefits,
+          })) || [],
+        riskFactors: d.risks || [],
+        potentialBenefits: d.benefits || [],
         riskLevel: d.risk_level || _computeRiskLevel(d.risks || []),
         riskLabel: d.risk_label || _computeRiskLabel(d.risks || []),
         riskColor: d.risk_color || _computeRiskColor(d.risks || []),

@@ -105,17 +105,20 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
                 logger.warning(f"Gagal ambil market data: {e}")
 
         # ── 5. Simpan ipo_details ─────────────────────────────────────────
+        kpi_data   = result.get("kpi", {})
+        market_cap = market.get("market_cap") or kpi_data.get("market_cap") or result.get("market_cap", "")
+
         analysis.ipo_details = json.dumps({
             "ticker":               ticker or "",
             "sector":               result.get("sector", ""),
             "ipo_date":             result.get("ipo_date", ""),
             "share_price":          result.get("share_price", ""),
             "total_shares":         result.get("total_shares", ""),
-            "market_cap":           market.get("market_cap") or result.get("market_cap", ""),
+            "market_cap":           market_cap,
             "current_price":        market.get("current_price", ""),
             "shares_outstanding":   market.get("shares_outstanding", ""),
             "use_of_funds":         result.get("use_of_funds", []),
-            "kpi":                  result.get("kpi", {}),
+            "kpi":                  kpi_data,
             "underwriter":          underwriter,
             "overall_risk_level":   overall_risk_level,
             "overall_risk_reason":  overall_risk_reason,
