@@ -742,6 +742,9 @@ export default function App() {
       console.log("financial:", d.financial);
       console.log("kpi:", d.ipo_details?.kpi);
 
+      // Ticker: dari hasil analisis backend
+      const ticker = d.ticker || d.ipo_details?.ticker || "";
+
       // Helper: pastikan nilai persen sudah angka, bukan string
       const toNum = (v) =>
         v === null || v === undefined
