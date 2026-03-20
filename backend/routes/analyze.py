@@ -157,36 +157,7 @@ def run_analysis(analysis_id: int, body: AnalyzeRequest = AnalyzeRequest(), db: 
         raise HTTPException(status_code=500, detail=f"Gagal menganalisis: {str(e)}")
 
 
-@router.get("/debug/{analysis_id}")
-def debug_analysis(analysis_id: int, db: Session = Depends(get_db)):
-    """Endpoint debug — lihat isi raw database untuk diagnosis."""
-    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Not found")
-
-    ipo = json.loads(analysis.ipo_details)    if analysis.ipo_details    else {}
-    fin = json.loads(analysis.financial_data) if analysis.financial_data else {}
-
-    return {
-        "company_name":      analysis.company_name,
-        "has_ipo_details":   bool(analysis.ipo_details),
-        "has_financial":     bool(analysis.financial_data),
-        "has_risks":         bool(analysis.risks),
-        "has_benefits":      bool(analysis.benefits),
-        "kpi":               ipo.get("kpi", {}),
-        "kpi_keys":          list(ipo.get("kpi", {}).keys()),
-        "use_of_funds_count":len(ipo.get("use_of_funds", [])),
-        "use_of_funds":      ipo.get("use_of_funds", []),
-        "financial_keys":    list(fin.keys()),
-        "financial_years":   fin.get("years", []),
-        "revenue_growth":    fin.get("revenue_growth", []),
-        "gross_margin":      fin.get("gross_margin", []),
-        "lang":              ipo.get("lang", "not set"),
-        "ticker":            ipo.get("ticker", ""),
-        "share_price":       ipo.get("share_price", ""),
-    }
-
-
+@router.get("/analysis/{analysis_id}")
 def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
