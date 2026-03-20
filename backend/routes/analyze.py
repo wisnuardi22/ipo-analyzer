@@ -3,18 +3,25 @@ from sqlalchemy.orm import Session
 from database.db import get_db, Analysis
 from services.gemini_service import analyze_prospectus
 from services.market_data import get_ticker_from_google, get_market_data
+from pydantic import BaseModel
+from typing import Optional
 import json
+import re
 import logging
 
 router = APIRouter(prefix="/api", tags=["analyze"])
 logger = logging.getLogger(__name__)
 
+class AnalyzeRequest(BaseModel):
+    lang: Optional[str] = "ID"
 
 @router.post("/analyze/{analysis_id}")
-def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
+def run_analysis(analysis_id: int, body: AnalyzeRequest = AnalyzeRequest(), db: Session = Depends(get_db)):
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
         raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+
+    lang = (body.lang or "ID").upper()  # "EN" atau "ID"
 
     # Inisialisasi semua variabel defensif agar tidak ada 'not defined' error
     ticker      = ""
@@ -27,7 +34,7 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
 
     try:
         # ── 1. Analisis prospektus via Gemini ────────────────────────────
-        result = analyze_prospectus(analysis.raw_text)
+        result = analyze_prospectus(analysis.raw_text, lang=lang)
 
         analysis.company_name   = result.get("company_name", analysis.company_name)
         analysis.summary        = result.get("summary", "")
@@ -87,17 +94,17 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
         analysis.risks    = json.dumps(risks)
         analysis.benefits = json.dumps(benefits)
 
-        # ── 3. Cari ticker — Gemini knowledge + IDX/Yahoo verification ───
-        company_name         = result.get("company_name", analysis.company_name)
-        ticker_from_gemini   = result.get("ticker", "").strip().upper()
+        # ── 3. Cari ticker ────────────────────────────────────────────────
+        company_name       = result.get("company_name", analysis.company_name)
+        ticker_from_gemini = result.get("ticker", "").strip().upper()
 
         ticker = ""
-        if ticker_from_gemini and len(ticker_from_gemini) >= 2:
-            # Gemini tahu tickernya — gunakan langsung
+        # Validasi ticker dari Gemini: harus 2-6 huruf kapital
+        if ticker_from_gemini and re.match(r'^[A-Z]{2,6}$', ticker_from_gemini):
             ticker = ticker_from_gemini
             logger.info(f"Ticker dari Gemini: {ticker}")
         else:
-            # Gemini tidak tahu — cari via IDX/Yahoo
+            # Gemini tidak tahu / format salah — cari via IDX/Yahoo
             try:
                 ticker = get_ticker_from_google(company_name, "")
                 logger.info(f"Ticker dari search: {ticker}")

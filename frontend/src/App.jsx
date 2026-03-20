@@ -730,7 +730,7 @@ export default function App() {
           ? "AI is analyzing document..."
           : "AI sedang menganalisis dokumen...",
       );
-      await axios.post(`${API_BASE}/analyze/${up.data.analysis_id}`);
+      await axios.post(`${API_BASE}/analyze/${up.data.analysis_id}`, { lang });
       const res = await axios.get(
         `${API_BASE}/analysis/${up.data.analysis_id}`,
       );

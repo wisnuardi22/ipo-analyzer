@@ -138,10 +138,12 @@ def llm_extract_financials(text: str) -> Dict[str, Any]:
 Output HANYA JSON murni — tidak ada teks penjelasan, tidak ada markdown.
 
 LANGKAH EKSTRAKSI:
-1. Temukan tabel laporan laba rugi. Judulnya bisa:
-   "LAPORAN LABA RUGI DAN PENGHASILAN KOMPREHENSIF LAIN KONSOLIDASIAN",
-   "Ikhtisar Data Keuangan Penting", "Ringkasan Keuangan",
-   "CONSOLIDATED STATEMENTS OF PROFIT OR LOSS"
+1. Temukan tabel laporan keuangan. Judulnya bisa:
+   - "LAPORAN LABA RUGI DAN PENGHASILAN KOMPREHENSIF LAIN KONSOLIDASIAN"
+   - "DATA KEUANGAN PENTING" / "IKHTISAR DATA KEUANGAN PENTING"
+   - "Ringkasan Keuangan" / "Informasi Keuangan Ringkas"
+   - "CONSOLIDATED STATEMENTS OF PROFIT OR LOSS"
+   - "SELECTED FINANCIAL DATA"
 
 2. Baca header kolom tabel → itulah daftar tahun yang tersedia (misal: 2021, 2022, 2023, 2024).
    Masukkan SEMUA tahun ke "tahun_tersedia" dan buat satu entry per tahun di "data_per_tahun".
@@ -196,7 +198,15 @@ OUTPUT JSON (struktur wajib persis seperti ini, isi dengan data nyata dari dokum
 
     chunks = chunk_text(text, max_len=15000, overlap=500)
     priority_chunks = []
-    keywords = ["laporan laba rugi", "ikhtisar data keuangan", "pendapatan bersih", "laba kotor", "gross profit"]
+    keywords = [
+        # Bahasa Indonesia
+        "laporan laba rugi", "ikhtisar data keuangan", "data keuangan penting",
+        "ringkasan keuangan", "pendapatan bersih", "laba kotor", "laba usaha",
+        "laba bersih", "pendapatan usaha", "penjualan bersih",
+        # Bahasa Inggris
+        "gross profit", "net revenue", "operating profit", "net income",
+        "profit or loss", "statement of profit",
+    ]
     for c in chunks:
         cl = c.lower()
         # Lewati chunk Daftar Isi — banyak "halaman" tapi tidak ada data angka
@@ -374,9 +384,28 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
     }
     return financial, kpi
 
-def llm_qualitative(text: str, kpi: Dict, financial: Dict) -> Dict:
+def llm_qualitative(text: str, kpi: Dict, financial: Dict, lang: str = "ID") -> Dict:
     """Analisis non-keuangan: summary, use of funds, risiko, penjamin, benefit."""
-    prompt = f"""Kamu adalah analis IPO Indonesia senior (CFA Level 3). Analisis prospektus berikut.
+
+    is_en = lang.upper() == "EN"
+    currency = financial.get("currency", "IDR")
+
+    # Instruksi bahasa output
+    lang_instruction = (
+        "LANGUAGE: Write ALL output (summary, sector, description, risks, benefits, reputation) in ENGLISH. "
+        "Only company_name, ticker, ipo_date stay as-is from the document."
+    ) if is_en else (
+        "BAHASA: Tulis SEMUA output (summary, sector, description, risks, benefits, reputation) dalam Bahasa Indonesia. "
+        "Hanya company_name, ticker, ipo_date yang tetap dari dokumen."
+    )
+
+    # Format currency sesuai prospektus
+    currency_note = f"Gunakan mata uang {currency} sesuai prospektus untuk semua nilai uang."
+
+    prompt = f"""Kamu adalah analis IPO senior. Analisis prospektus berikut.
+
+{lang_instruction}
+{currency_note}
 
 DATA REFERENSI SUDAH DIHITUNG SISTEM (jangan hitung ulang, salin langsung):
 - Market Cap  : {kpi.get('market_cap', 'N/A')}
@@ -386,32 +415,35 @@ DATA REFERENSI SUDAH DIHITUNG SISTEM (jangan hitung ulang, salin langsung):
 TUGAS — Hasilkan JSON analisis lengkap:
 
 1. IDENTITAS:
-   - company_name: nama lengkap + Tbk
+   - company_name: nama lengkap + Tbk (dari dokumen)
    - ticker: kode saham IDX dari pengetahuanmu (2-6 huruf kapital), kosong "" jika tidak tahu
-   - sector: spesifik (misal "Pertambangan Emas & Mineral Ikutan")
+   - sector: {'specific sector in English (e.g. "Gold & Mineral Mining")' if is_en else 'sektor spesifik (misal "Pertambangan Emas & Mineral Ikutan")'}
    - ipo_date: tanggal pencatatan BEI
-   - share_price: harga penawaran final dengan "Rp" (jika range, nilai tertinggi)
+   - share_price: harga penawaran final (gunakan {currency})
    - total_shares: total saham beredar setelah IPO
-   - market_cap: SALIN PERSIS nilai Market Cap dari DATA REFERENSI di atas (jangan hitung sendiri)
+   - market_cap: SALIN PERSIS nilai Market Cap dari DATA REFERENSI di atas
 
-2. SUMMARY: 3 paragraf Bahasa Indonesia awam, spesifik dengan angka dari prospektus.
+2. SUMMARY: 3 paragraf {'in English' if is_en else 'Bahasa Indonesia'} untuk investor awam, spesifik dengan angka dari prospektus.
    Pisahkan dengan \\n\\n.
 
 3. PENGGUNAAN DANA IPO:
-   Cari: "Rencana Penggunaan Dana" / "Penggunaan Dana Hasil Penawaran Umum" / "Alokasi Dana"
-   - WAJIB diisi minimal 2 item (jangan kosong [])
-   - allocation: persentase, total = 100
-   - description: SPESIFIK (nama anak usaha, nilai, tujuan konkret)
+   Cari bagian: "Rencana Penggunaan Dana" / "Penggunaan Dana Hasil Penawaran Umum" / "Use of Proceeds"
+   WAJIB:
+   - Minimal 2 item, maksimal 6 item sesuai dokumen
+   - allocation: persentase PERSIS seperti di dokumen (bukan estimasi/asumsi). Total harus = 100.
+   - DILARANG membuat allocation 50/50 atau angka bulat yang tidak ada di dokumen
+   - category & description: {'in English, specific with project names and values in ' + currency if is_en else 'Bahasa Indonesia, spesifik dengan nama proyek dan nilai ' + currency}
 
 4. PENJAMIN EMISI:
-   - lead, others (array), type, reputation (analisis track record)
+   - lead, others (array), type
+   - reputation: {'analysis of underwriter track record in English' if is_en else 'analisis track record penjamin emisi dalam Bahasa Indonesia'}
 
 5. RISIKO:
    - overall_risk_level: "High"/"Medium"/"Low"
-   - overall_risk_reason: 2-3 kalimat
-   - risks: 3-5 item sesuai level, title + desc spesifik
+   - overall_risk_reason: {'2-3 sentences in English' if is_en else '2-3 kalimat Bahasa Indonesia'}
+   - risks: 3-5 item, title + desc {'in English' if is_en else 'Bahasa Indonesia'} spesifik
 
-6. BENEFIT: 4-6 keunggulan spesifik dengan angka konkret
+6. BENEFIT: 4-6 keunggulan spesifik dengan angka konkret {'in English' if is_en else 'Bahasa Indonesia'}
 
 ATURAN: Output JSON murni, tidak ada teks lain, tidak ada markdown.
 
@@ -478,11 +510,11 @@ OUTPUT JSON:
                     continue
             raise ValueError(f"Tidak bisa parse JSON: {raw[:300]}")
 
-def analyze_prospectus(text: str) -> dict:
-    fx_rate = detect_fx_rate(text)
-    fin_raw = llm_extract_financials(text)
+def analyze_prospectus(text: str, lang: str = "ID") -> dict:
+    fx_rate  = detect_fx_rate(text)
+    fin_raw  = llm_extract_financials(text)
     financial, kpi = normalize_and_compute(fin_raw, fx_rate)
-    result = llm_qualitative(text, kpi, financial)
+    result   = llm_qualitative(text, kpi, financial, lang=lang)
     result["financial"] = financial
     result["kpi"]       = kpi
     return result
