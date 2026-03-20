@@ -735,12 +735,15 @@ export default function App() {
         `${API_BASE}/analysis/${up.data.analysis_id}`,
       );
       const d = res.data;
-      // DEBUG: lihat raw response dari backend
-      console.log("=== RAW API RESPONSE ===", JSON.stringify(d, null, 2));
-      console.log("use_of_funds:", d.use_of_funds);
-      console.log("ipo_details.use_of_funds:", d.ipo_details?.use_of_funds);
-      console.log("financial:", d.financial);
-      console.log("kpi:", d.ipo_details?.kpi);
+      // DEBUG lightweight
+      console.log(
+        "API OK - company:",
+        d.company_name,
+        "| use_of_funds:",
+        d.ipo_details?.use_of_funds?.length,
+        "items | financial years:",
+        d.financial?.years,
+      );
 
       // Ticker: dari hasil analisis backend
       const ticker = d.ticker || d.ipo_details?.ticker || "";
@@ -820,10 +823,10 @@ export default function App() {
           ),
         },
         financialTrends: {
-          revenue: normFinancial(d.financial?.revenue_growth) || null,
-          grossMargin: normFinancial(d.financial?.gross_margin) || null,
-          operatingMargin: normFinancial(d.financial?.operating_margin) || null,
-          ebitdaMargin: normFinancial(d.financial?.ebitda_margin) || null,
+          revenue: normFinancial(d.financial?.revenue_growth) || [],
+          grossMargin: normFinancial(d.financial?.gross_margin) || [],
+          operatingMargin: normFinancial(d.financial?.operating_margin) || [],
+          ebitdaMargin: normFinancial(d.financial?.ebitda_margin) || [],
         },
         // pre-computed trend tags
         trendTags: {
@@ -1637,6 +1640,19 @@ export default function App() {
                   // ── Dinamis: 1 tahun → bar chart, >1 tahun → line chart ──
                   const chartType =
                     (ch.data?.length || 0) <= 1 ? "bar" : "line";
+                  if (!ch.data || ch.data.length === 0)
+                    return (
+                      <div
+                        key={i}
+                        className="bg-gray-50 dark:bg-gray-800 rounded-xl p-6 border border-gray-100 dark:border-gray-700 flex items-center justify-center h-48"
+                      >
+                        <p className="text-gray-400 text-sm">
+                          {lang === "EN"
+                            ? "No data available"
+                            : "Data tidak tersedia"}
+                        </p>
+                      </div>
+                    );
                   return (
                     <div
                       key={i}
