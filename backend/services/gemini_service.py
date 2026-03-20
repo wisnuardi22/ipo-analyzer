@@ -12,33 +12,61 @@ client = OpenAI(
 
 MODEL = "gemini/gemini-2.5-flash"
 
-def parse_number(raw: Optional[str]) -> Optional[float]:
-    """Parse angka Indonesia/Inggris; dukung (xxx) = negatif."""
+def parse_number(raw: Optional[Any]) -> Optional[float]:
+    """Parse angka Indonesia/Inggris; dukung (xxx) = negatif, amankan tipe data."""
     if raw is None:
         return None
-    s = raw.strip()
-    if not s:
+    # Jika sudah float/int (hasil json.loads), langsung kembalikan
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    s = str(raw).strip()
+    if not s or s.lower() in ("null", "n/a", "-"):
         return None
     neg = False
     if s.startswith('(') and s.endswith(')'):
         neg = True
         s = s[1:-1]
-    s2 = re.sub(r'[^0-9\-,\.]', '', s)
-    if '.' in s2 and ',' in s2:
-        s2 = s2.replace('.', '').replace(',', '.')
-    elif ',' in s2 and '.' not in s2:
-        s2 = s2.replace(',', '')
+    elif s.startswith('-'):
+        neg = True
+        s = s[1:]
+    # Buang semua karakter kecuali angka, koma, titik
+    s = re.sub(r'[^0-9\.,]', '', s)
+    if not s:
+        return None
+    # Deteksi format Indonesia vs Inggris secara pintar
+    if '.' in s and ',' in s:
+        last_dot   = s.rfind('.')
+        last_comma = s.rfind(',')
+        if last_comma > last_dot:
+            # Format Indonesia: 1.000.000,50
+            s = s.replace('.', '').replace(',', '.')
+        else:
+            # Format Inggris: 1,000,000.50
+            s = s.replace(',', '')
+    elif ',' in s:
+        parts = s.split(',')
+        if len(parts) == 2 and len(parts[1]) <= 2:
+            s = s.replace(',', '.')   # Desimal Indonesia: 1.234,56
+        else:
+            s = s.replace(',', '')    # Ribuan: 1,000
+    elif '.' in s:
+        parts = s.split('.')
+        if len(parts) == 2 and len(parts[1]) <= 2:
+            pass                      # Desimal Inggris: 1234.56
+        else:
+            s = s.replace('.', '')    # Ribuan Indonesia: 1.000
     try:
-        val = float(s2)
+        val = float(s)
         return -val if neg else val
     except Exception:
         return None
 
 def safe_div(a, b) -> Optional[float]:
     try:
-        if a is None or b is None or float(b) == 0:
+        a_f, b_f = parse_number(a), parse_number(b)
+        if a_f is None or b_f is None or b_f == 0:
             return None
-        return float(a) / float(b)
+        return a_f / b_f
     except:
         return None
 
@@ -53,24 +81,23 @@ def pct(val) -> Optional[float]:
 
 def calc_growth(cur, prev) -> Optional[float]:
     try:
-        if cur is None or prev is None or float(prev) == 0:
+        c, p = parse_number(cur), parse_number(prev)
+        if c is None or p is None or p == 0:
             return None
-        return round(((float(cur) - float(prev)) / abs(float(prev))) * 100, 2)
+        return round(((c - p) / abs(p)) * 100, 2)
     except:
         return None
 
 def apply_unit(val, unit: str) -> Optional[float]:
-    if val is None:
+    # Pakai parse_number agar string seperti "45,000" aman dikonversi dulu
+    v = parse_number(val)
+    if v is None:
         return None
-    try:
-        v = float(val)
-        if unit == "jutaan":
-            return v * 1_000_000
-        if unit == "ribuan":
-            return v * 1_000
-        return v
-    except:
-        return None
+    if unit == "jutaan":
+        return v * 1_000_000
+    if unit == "ribuan":
+        return v * 1_000
+    return v
 
 def detect_currency_and_unit(text: str) -> Tuple[str, str]:
     t = text.lower()
@@ -107,24 +134,58 @@ def llm_extract_financials(text: str) -> Dict[str, Any]:
     Kirim potongan teks ke Gemini, minta ekstrak angka mentah keuangan.
     Multi-chunk: gabungkan hasil tiap chunk.
     """
-    sys_prompt = """Kamu adalah akuntan Indonesia. Ekstrak angka mentah dari potongan prospektus IPO.
-Output HANYA JSON murni tanpa teks lain:
+    sys_prompt = """Kamu adalah akuntan Indonesia. Tugasmu: ekstrak angka keuangan mentah dari potongan prospektus IPO.
+Output HANYA JSON murni — tidak ada teks penjelasan, tidak ada markdown.
+
+LANGKAH EKSTRAKSI:
+1. Temukan tabel laporan laba rugi. Judulnya bisa:
+   "LAPORAN LABA RUGI DAN PENGHASILAN KOMPREHENSIF LAIN KONSOLIDASIAN",
+   "Ikhtisar Data Keuangan Penting", "Ringkasan Keuangan",
+   "CONSOLIDATED STATEMENTS OF PROFIT OR LOSS"
+
+2. Baca header kolom tabel → itulah daftar tahun yang tersedia (misal: 2021, 2022, 2023, 2024).
+   Masukkan SEMUA tahun ke "tahun_tersedia" dan buat satu entry per tahun di "data_per_tahun".
+
+3. Untuk setiap tahun, catat:
+   - pendapatan   : Total Pendapatan / Revenue / Net Revenue
+   - laba_kotor   : Laba Kotor / Gross Profit
+   - laba_usaha   : Laba Usaha / Operating Profit (bisa negatif)
+   - laba_bersih  : Laba Bersih / Net Profit (bisa negatif)
+   - depresiasi   : Depresiasi & Amortisasi (isi null jika tidak ada)
+
+4. Catat satuan dari header tabel:
+   - "dalam jutaan Rupiah" → satuan = "jutaan"
+   - "dalam ribuan" → satuan = "ribuan"
+   - tidak ada keterangan → satuan = "full"
+
+5. Tulis angka PERSIS seperti di dokumen — JANGAN konversi ke satuan lain.
+   Angka dalam kurung misal (1.234) artinya negatif → tulis -1234.
+
+6. Dari Laporan Posisi Keuangan / Neraca, ambil data tahun TERAKHIR:
+   - total_ekuitas_terakhir
+   - total_liabilitas_terakhir
+
+7. Cari juga:
+   - total_saham_beredar: jumlah saham beredar SETELAH IPO
+   - harga_penawaran_angka: harga per saham (angka saja, tanpa "Rp")
+
+8. Jika potongan ini tidak mengandung data keuangan → isi null atau [].
+
+OUTPUT JSON (struktur wajib persis seperti ini, isi dengan data nyata dari dokumen):
 {
-  "satuan": "full|jutaan|ribuan",
-  "mata_uang": "IDR|USD",
-  "tahun_tersedia": ["2022","2023","2024"],
+  "satuan": "jutaan",
+  "mata_uang": "IDR",
+  "tahun_tersedia": ["2022", "2023", "2024"],
   "data_per_tahun": [
-    {"tahun":"2023","pendapatan":75765791,"laba_kotor":6378346,"laba_usaha":8234,"laba_bersih":234567,"depresiasi":null}
+    {"tahun": "2022", "pendapatan": null, "laba_kotor": null, "laba_usaha": null, "laba_bersih": null, "depresiasi": null},
+    {"tahun": "2023", "pendapatan": null, "laba_kotor": null, "laba_usaha": null, "laba_bersih": null, "depresiasi": null},
+    {"tahun": "2024", "pendapatan": null, "laba_kotor": null, "laba_usaha": null, "laba_bersih": null, "depresiasi": null}
   ],
-  "total_ekuitas_terakhir": 1234567890,
-  "total_liabilitas_terakhir": 987654321,
-  "total_saham_beredar": 5000000000,
-  "harga_penawaran_angka": 500
-}
-PENTING:
-- Catat angka PERSIS seperti di dokumen (jika satuan jutaan, tulis nilai jutaannya)
-- Cari di: "LAPORAN LABA RUGI DAN PENGHASILAN KOMPREHENSIF LAIN KONSOLIDASIAN", "Ikhtisar Data Keuangan Penting"
-- Jika tidak ada di potongan ini → isi null/[]"""
+  "total_ekuitas_terakhir": null,
+  "total_liabilitas_terakhir": null,
+  "total_saham_beredar": null,
+  "harga_penawaran_angka": null
+}"""
 
     merged = {
         "satuan": None, "mata_uang": None,
@@ -138,6 +199,9 @@ PENTING:
     keywords = ["laporan laba rugi", "ikhtisar data keuangan", "pendapatan bersih", "laba kotor", "gross profit"]
     for c in chunks:
         cl = c.lower()
+        # Lewati chunk Daftar Isi — banyak "halaman" tapi tidak ada data angka
+        if "daftar isi" in cl and cl.count("halaman") > 5:
+            continue
         if any(k in cl for k in keywords):
             priority_chunks.append(c)
     if chunks and chunks[0] not in priority_chunks:
@@ -171,7 +235,7 @@ PENTING:
         try:
             resp = client.chat.completions.create(
                 model=MODEL,
-                temperature=0.05,
+                temperature=0.01,
                 max_tokens=3000,
                 messages=[
                     {"role": "system", "content": sys_prompt},
@@ -179,7 +243,7 @@ PENTING:
                 ]
             )
             part = safe_json(resp.choices[0].message.content) or {}
-        except Exception as e:
+        except Exception:
             part = {}
 
         if not merged["satuan"] and part.get("satuan"):
@@ -187,24 +251,26 @@ PENTING:
         if not merged["mata_uang"] and part.get("mata_uang"):
             merged["mata_uang"] = part["mata_uang"]
         if part.get("tahun_tersedia"):
-            merged["tahun_tersedia"] = sorted(set(merged["tahun_tersedia"]) | set(part["tahun_tersedia"]))
+            merged["tahun_tersedia"] = sorted(list(set(merged["tahun_tersedia"]) | set(part["tahun_tersedia"])))
         if part.get("data_per_tahun"):
-            m_dict = {d["tahun"]: d for d in merged["data_per_tahun"] if d.get("tahun")}
+            m_dict = {str(d.get("tahun","")).strip(): d for d in merged["data_per_tahun"] if str(d.get("tahun","")).strip()}
             for d in part["data_per_tahun"]:
                 y = str(d.get("tahun","")).strip()
                 if not y:
                     continue
                 if y in m_dict:
-                    # Merge field: prefer non-null
                     for k in ["pendapatan","laba_kotor","laba_usaha","laba_bersih","depresiasi"]:
-                        if m_dict[y].get(k) is None and d.get(k) is not None:
-                            m_dict[y][k] = d[k]
+                        val = d.get(k)
+                        # Overwrite hanya jika nilai baru tidak null dan yang lama kosong
+                        if m_dict[y].get(k) is None and val is not None and str(val).strip() not in ("null", ""):
+                            m_dict[y][k] = val
                 else:
                     m_dict[y] = d
             merged["data_per_tahun"] = [m_dict[k] for k in sorted(m_dict.keys())]
         for k in ["total_ekuitas_terakhir","total_liabilitas_terakhir","total_saham_beredar","harga_penawaran_angka"]:
-            if merged.get(k) is None and part.get(k) is not None:
-                merged[k] = part[k]
+            val = part.get(k)
+            if merged.get(k) is None and val is not None and str(val).strip() not in ("null", ""):
+                merged[k] = val
 
     return merged
 
@@ -222,8 +288,9 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
 
     ekuitas    = apply_unit(fin_raw.get("total_ekuitas_terakhir"), unit)
     liabilitas = apply_unit(fin_raw.get("total_liabilitas_terakhir"), unit)
-    saham      = fin_raw.get("total_saham_beredar")
-    harga      = fin_raw.get("harga_penawaran_angka")
+    # Saham & harga selalu dalam satuan penuh (tidak perlu apply_unit)
+    saham      = parse_number(fin_raw.get("total_saham_beredar"))
+    harga      = parse_number(fin_raw.get("harga_penawaran_angka"))
 
     revenue_growth, gross_margin, op_margin, ebitda_margin, net_margin = [], [], [], [], []
     prev_rev = None
@@ -249,43 +316,56 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
     laba_bersih = years_data[-1].get("laba_bersih") if years_data else None
 
     try:
-        if saham and laba_bersih and float(saham) > 0:
-            eps_val = float(laba_bersih) / float(saham)
-            kpi["eps"] = f"Rp {eps_val:,.0f}".replace(",",".") if currency=="IDR" else f"USD {eps_val:.6f}"
+        if saham and laba_bersih and saham > 0:
+            eps_val = laba_bersih / saham
+            kpi["eps"] = f"Rp {eps_val:,.2f}".replace(",",".") if currency=="IDR" else f"USD {eps_val:.6f}"
             if harga and eps_val != 0:
-                if currency == "USD" and fx_rate and fx_rate > 0:
-                    price_ccy = float(harga) / fx_rate
-                else:
-                    price_ccy = float(harga)
+                price_ccy = harga / fx_rate if (currency == "USD" and fx_rate and fx_rate > 0) else harga
                 pe = price_ccy / eps_val
                 kpi["pe"] = f"{pe:.1f}x" if pe > 0 else "N/A (Rugi)"
     except:
         pass
 
     try:
-        if ekuitas and saham and float(saham) > 0 and harga:
-            bvps = float(ekuitas) / float(saham)
+        if ekuitas and saham and saham > 0 and harga:
+            bvps = ekuitas / saham
             if bvps > 0:
-                price_ccy = float(harga)/(fx_rate or 1) if currency=="USD" else float(harga)
+                price_ccy = harga / (fx_rate or 1) if currency=="USD" else harga
                 kpi["pb"] = f"{price_ccy/bvps:.2f}x"
     except:
         pass
 
     try:
-        if ekuitas and laba_bersih and float(ekuitas) > 0:
-            kpi["roe"] = f"{(float(laba_bersih)/float(ekuitas))*100:.1f}%"
+        if ekuitas and laba_bersih and ekuitas > 0:
+            kpi["roe"] = f"{(laba_bersih/ekuitas)*100:.1f}%"
     except:
         pass
 
     try:
-        if ekuitas and liabilitas and float(ekuitas) > 0:
-            kpi["der"] = f"{float(liabilitas)/float(ekuitas):.2f}x"
+        if ekuitas and liabilitas and ekuitas > 0:
+            kpi["der"] = f"{liabilitas/ekuitas:.2f}x"
+    except:
+        pass
+
+    # Hitung market cap di Python (jangan serahkan ke LLM)
+    kpi["market_cap"] = "N/A"
+    try:
+        if saham and harga and saham > 0 and harga > 0:
+            mc = saham * harga
+            if currency == "IDR":
+                if mc >= 1_000_000_000_000:
+                    kpi["market_cap"] = f"Rp {mc/1_000_000_000_000:.2f} Triliun"
+                else:
+                    kpi["market_cap"] = f"Rp {mc/1_000_000_000:.2f} Miliar"
+            else:
+                kpi["market_cap"] = f"USD {mc:,.0f}"
     except:
         pass
 
     financial = {
         "currency":          currency,
-        "years":             [d.get("tahun","") for d in years_data],
+        "years":             [str(d.get("tahun","")) for d in years_data],
+        "absolute_data":     years_data,
         "revenue_growth":    revenue_growth or None,
         "gross_margin":      gross_margin   or None,
         "operating_margin":  op_margin      or None,
@@ -298,9 +378,10 @@ def llm_qualitative(text: str, kpi: Dict, financial: Dict) -> Dict:
     """Analisis non-keuangan: summary, use of funds, risiko, penjamin, benefit."""
     prompt = f"""Kamu adalah analis IPO Indonesia senior (CFA Level 3). Analisis prospektus berikut.
 
-DATA KEUANGAN SUDAH DIHITUNG (gunakan ini sebagai referensi, jangan hitung ulang):
-KPI: {json.dumps(kpi, ensure_ascii=False)}
-Tahun data: {financial.get('years', [])}
+DATA REFERENSI SUDAH DIHITUNG SISTEM (jangan hitung ulang, salin langsung):
+- Market Cap  : {kpi.get('market_cap', 'N/A')}
+- KPI Lengkap : {json.dumps(kpi, ensure_ascii=False)}
+- Tahun data  : {financial.get('years', [])}
 
 TUGAS — Hasilkan JSON analisis lengkap:
 
@@ -311,7 +392,7 @@ TUGAS — Hasilkan JSON analisis lengkap:
    - ipo_date: tanggal pencatatan BEI
    - share_price: harga penawaran final dengan "Rp" (jika range, nilai tertinggi)
    - total_shares: total saham beredar setelah IPO
-   - market_cap: nilai pasar (harga × saham)
+   - market_cap: SALIN PERSIS nilai Market Cap dari DATA REFERENSI di atas (jangan hitung sendiri)
 
 2. SUMMARY: 3 paragraf Bahasa Indonesia awam, spesifik dengan angka dari prospektus.
    Pisahkan dengan \\n\\n.
