@@ -16,6 +16,15 @@ def run_analysis(analysis_id: int, db: Session = Depends(get_db)):
     if not analysis:
         raise HTTPException(status_code=404, detail="Data tidak ditemukan")
 
+    # Inisialisasi semua variabel defensif agar tidak ada 'not defined' error
+    ticker      = ""
+    market      = {}
+    underwriter = {}
+    risks       = []
+    benefits    = []
+    overall_risk_level  = "MEDIUM"
+    overall_risk_reason = ""
+
     try:
         # ── 1. Analisis prospektus via Gemini ────────────────────────────
         result = analyze_prospectus(analysis.raw_text)
