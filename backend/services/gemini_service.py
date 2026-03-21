@@ -1,5 +1,6 @@
 from openai import OpenAI
 import json, re, os, math
+from decimal import Decimal, InvalidOperation
 from typing import Optional, List, Dict, Any, Tuple
 from dotenv import load_dotenv
 
@@ -12,11 +13,13 @@ client = OpenAI(
 
 MODEL = "gemini/gemini-2.5-flash"
 
+# ══════════════════════════════════════════════════════════════════
+# UTIL UMUM
+# ══════════════════════════════════════════════════════════════════
+
 def parse_number(raw: Optional[Any]) -> Optional[float]:
-    """Parse angka Indonesia/Inggris; dukung (xxx) = negatif, amankan tipe data."""
     if raw is None:
         return None
-    # Jika sudah float/int (hasil json.loads), langsung kembalikan
     if isinstance(raw, (int, float)):
         return float(raw)
     s = str(raw).strip()
@@ -29,36 +32,40 @@ def parse_number(raw: Optional[Any]) -> Optional[float]:
     elif s.startswith('-'):
         neg = True
         s = s[1:]
-    # Buang semua karakter kecuali angka, koma, titik
     s = re.sub(r'[^0-9\.,]', '', s)
     if not s:
         return None
-    # Deteksi format Indonesia vs Inggris secara pintar
     if '.' in s and ',' in s:
         last_dot   = s.rfind('.')
         last_comma = s.rfind(',')
         if last_comma > last_dot:
-            # Format Indonesia: 1.000.000,50
             s = s.replace('.', '').replace(',', '.')
         else:
-            # Format Inggris: 1,000,000.50
             s = s.replace(',', '')
     elif ',' in s:
         parts = s.split(',')
         if len(parts) == 2 and len(parts[1]) <= 2:
-            s = s.replace(',', '.')   # Desimal Indonesia: 1.234,56
+            s = s.replace(',', '.')
         else:
-            s = s.replace(',', '')    # Ribuan: 1,000
+            s = s.replace(',', '')
     elif '.' in s:
         parts = s.split('.')
         if len(parts) == 2 and len(parts[1]) <= 2:
-            pass                      # Desimal Inggris: 1234.56
+            pass
         else:
-            s = s.replace('.', '')    # Ribuan Indonesia: 1.000
+            s = s.replace('.', '')
     try:
         val = float(s)
         return -val if neg else val
     except Exception:
+        return None
+
+def to_decimal(s: Optional[str]) -> Optional[Decimal]:
+    if not s:
+        return None
+    try:
+        return Decimal(str(s))
+    except (InvalidOperation, ValueError):
         return None
 
 def safe_div(a, b) -> Optional[float]:
@@ -89,7 +96,6 @@ def calc_growth(cur, prev) -> Optional[float]:
         return None
 
 def apply_unit(val, unit: str) -> Optional[float]:
-    # Pakai parse_number agar string seperti "45,000" aman dikonversi dulu
     v = parse_number(val)
     if v is None:
         return None
@@ -129,11 +135,138 @@ def chunk_text(s: str, max_len: int = 15000, overlap: int = 500) -> List[str]:
         i += max(1, max_len - overlap)
     return chunks
 
+# ══════════════════════════════════════════════════════════════════
+# REGEX FALLBACK — dari ipo_from_prospectus_general.py
+# ══════════════════════════════════════════════════════════════════
+
+def _grab_first_number(line: str) -> Optional[Decimal]:
+    m = re.search(r"[-]?\d[\d\.\,]*", line)
+    if not m:
+        return None
+    token = m.group(0).strip().replace("−", "-")
+    token = re.sub(r"[^0-9\.\-]", "", token.replace(",", "."))
+    try:
+        return Decimal(token)
+    except:
+        return None
+
+def regex_extract_financials(text: str) -> Dict[str, Any]:
+    """
+    Fallback: ekstrak data keuangan via regex dari teks prospektus.
+    Mengembalikan format yang kompatibel dengan normalize_and_compute().
+    """
+    rev_by_year: Dict[str, Optional[float]] = {}
+    gp_by_year:  Dict[str, Optional[float]] = {}
+    op_by_year:  Dict[str, Optional[float]] = {}
+    ni_by_year:  Dict[str, Optional[float]] = {}
+    eq_by_year:  Dict[str, Optional[float]] = {}
+    lb_by_year:  Dict[str, Optional[float]] = {}
+
+    lines = text.splitlines()
+    for ln in lines:
+        l = ln.lower()
+        yr_m = re.search(r"(20\d{2})", ln)
+        yr = yr_m.group(1) if yr_m else None
+        val = _grab_first_number(ln)
+        if val is None:
+            continue
+        fval = float(val)
+
+        if "pendapatan" in l or "revenue" in l or "penjualan" in l:
+            if yr and yr not in rev_by_year:
+                rev_by_year[yr] = fval
+        if "laba kotor" in l or "gross profit" in l:
+            if yr and yr not in gp_by_year:
+                gp_by_year[yr] = fval
+        if ("laba usaha" in l or "rugi usaha" in l or
+                "operating profit" in l or "operating income" in l):
+            if yr and yr not in op_by_year:
+                op_by_year[yr] = fval
+        if ("laba bersih" in l or "rugi bersih" in l or
+                "laba periode" in l or "rugi periode" in l or
+                "net profit" in l or "net income" in l or
+                "loss for the period" in l):
+            if yr and yr not in ni_by_year:
+                ni_by_year[yr] = fval
+        if "jumlah ekuitas" in l or "total equity" in l:
+            if yr and yr not in eq_by_year:
+                eq_by_year[yr] = fval
+        if "jumlah liabilitas" in l or "total liabilit" in l:
+            if yr and yr not in lb_by_year:
+                lb_by_year[yr] = fval
+
+    # Ambil semua tahun yang ditemukan
+    all_years = sorted(set(
+        list(rev_by_year.keys()) + list(gp_by_year.keys()) +
+        list(op_by_year.keys())  + list(ni_by_year.keys())
+    ))
+
+    if not all_years:
+        return {}
+
+    data_per_tahun = []
+    for y in all_years:
+        data_per_tahun.append({
+            "tahun":       y,
+            "pendapatan":  rev_by_year.get(y),
+            "laba_kotor":  gp_by_year.get(y),
+            "laba_usaha":  op_by_year.get(y),
+            "laba_bersih": ni_by_year.get(y),
+            "depresiasi":  None,
+        })
+
+    # Ekuitas & liabilitas tahun terakhir
+    last_eq = eq_by_year.get(all_years[-1]) if eq_by_year else None
+    last_lb = lb_by_year.get(all_years[-1]) if lb_by_year else None
+
+    # Saham & harga via regex
+    saham = None
+    for pat in [
+        r"jumlah\s+saham\s+(?:yang\s+)?(?:akan\s+)?dicatatkan.*?(\d{1,3}(?:\.\d{3})+)",
+        r"jumlah\s+saham\s+beredar\s+setelah\s+IPO.*?(\d{1,3}(?:\.\d{3})+)",
+        r"(\d{1,3}(?:\.\d{3}){3,})\s*saham.*?dicatatkan",
+    ]:
+        m = re.search(pat, text, re.I | re.S)
+        if m:
+            s = re.sub(r"[^\d]", "", m.group(1))
+            try:
+                saham = int(s)
+                break
+            except:
+                pass
+
+    harga = None
+    for pat in [
+        r"Harga\s+Penawaran\s*:?\s*Rp\s*([\d\.]+)",
+        r"Offering\s+Price\s*:?\s*Rp\s*([\d\.]+)",
+    ]:
+        m = re.search(pat, text, re.I)
+        if m:
+            h = re.sub(r"[^\d]", "", m.group(1))
+            try:
+                harga = int(h)
+                break
+            except:
+                pass
+
+    currency, unit = detect_currency_and_unit(text)
+
+    return {
+        "satuan":                   unit,
+        "mata_uang":                currency,
+        "tahun_tersedia":           all_years,
+        "data_per_tahun":           data_per_tahun,
+        "total_ekuitas_terakhir":   last_eq,
+        "total_liabilitas_terakhir":last_lb,
+        "total_saham_beredar":      saham,
+        "harga_penawaran_angka":    harga,
+    }
+
+# ══════════════════════════════════════════════════════════════════
+# LLM EXTRACT FINANCIALS
+# ══════════════════════════════════════════════════════════════════
+
 def llm_extract_financials(text: str) -> Dict[str, Any]:
-    """
-    Kirim potongan teks ke Gemini, minta ekstrak angka mentah keuangan.
-    Multi-chunk: gabungkan hasil tiap chunk.
-    """
     sys_prompt = """Kamu adalah akuntan Indonesia. Tugasmu: ekstrak angka keuangan mentah dari potongan prospektus IPO.
 Output HANYA JSON murni — tidak ada teks penjelasan, tidak ada markdown.
 
@@ -173,7 +306,7 @@ LANGKAH EKSTRAKSI:
 
 8. Jika potongan ini tidak mengandung data keuangan → isi null atau [].
 
-OUTPUT JSON (struktur wajib persis seperti ini, isi dengan data nyata dari dokumen):
+OUTPUT JSON:
 {
   "satuan": "jutaan",
   "mata_uang": "IDR",
@@ -199,17 +332,14 @@ OUTPUT JSON (struktur wajib persis seperti ini, isi dengan data nyata dari dokum
     chunks = chunk_text(text, max_len=15000, overlap=500)
     priority_chunks = []
     keywords = [
-        # Bahasa Indonesia
         "laporan laba rugi", "ikhtisar data keuangan", "data keuangan penting",
         "ringkasan keuangan", "pendapatan bersih", "laba kotor", "laba usaha",
         "laba bersih", "pendapatan usaha", "penjualan bersih",
-        # Bahasa Inggris
         "gross profit", "net revenue", "operating profit", "net income",
         "profit or loss", "statement of profit",
     ]
     for c in chunks:
         cl = c.lower()
-        # Lewati chunk Daftar Isi — banyak "halaman" tapi tidak ada data angka
         if "daftar isi" in cl and cl.count("halaman") > 5:
             continue
         if any(k in cl for k in keywords):
@@ -249,7 +379,7 @@ OUTPUT JSON (struktur wajib persis seperti ini, isi dengan data nyata dari dokum
                 max_tokens=3000,
                 messages=[
                     {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": f"DOKUMEN:\n{chunk}"}
+                    {"role": "user",   "content": f"DOKUMEN:\n{chunk}"}
                 ]
             )
             part = safe_json(resp.choices[0].message.content) or {}
@@ -271,18 +401,70 @@ OUTPUT JSON (struktur wajib persis seperti ini, isi dengan data nyata dari dokum
                 if y in m_dict:
                     for k in ["pendapatan","laba_kotor","laba_usaha","laba_bersih","depresiasi"]:
                         val = d.get(k)
-                        # Overwrite hanya jika nilai baru tidak null dan yang lama kosong
-                        if m_dict[y].get(k) is None and val is not None and str(val).strip() not in ("null", ""):
+                        if m_dict[y].get(k) is None and val is not None and str(val).strip() not in ("null",""):
                             m_dict[y][k] = val
                 else:
                     m_dict[y] = d
             merged["data_per_tahun"] = [m_dict[k] for k in sorted(m_dict.keys())]
         for k in ["total_ekuitas_terakhir","total_liabilitas_terakhir","total_saham_beredar","harga_penawaran_angka"]:
             val = part.get(k)
-            if merged.get(k) is None and val is not None and str(val).strip() not in ("null", ""):
+            if merged.get(k) is None and val is not None and str(val).strip() not in ("null",""):
                 merged[k] = val
 
     return merged
+
+# ══════════════════════════════════════════════════════════════════
+# MERGE LLM + REGEX (LLM prioritas, regex sebagai fallback)
+# ══════════════════════════════════════════════════════════════════
+
+def _has_financial_data(fin_raw: Dict) -> bool:
+    """Cek apakah hasil LLM punya data keuangan yang bermakna."""
+    years = fin_raw.get("data_per_tahun", [])
+    if not years:
+        return False
+    for yr in years:
+        for k in ["pendapatan", "laba_kotor", "laba_usaha", "laba_bersih"]:
+            if yr.get(k) is not None:
+                return True
+    return False
+
+def extract_financials_with_fallback(text: str) -> Dict[str, Any]:
+    """
+    1. Coba LLM dulu (lebih akurat untuk tabel kompleks)
+    2. Jika LLM tidak dapat data → pakai regex fallback
+    3. Merge: field yang masih null di LLM diisi dari regex
+    """
+    llm_result = llm_extract_financials(text)
+    regex_result = regex_extract_financials(text)
+
+    if not regex_result:
+        return llm_result
+
+    if not _has_financial_data(llm_result):
+        # LLM gagal total → pakai regex sepenuhnya
+        return regex_result
+
+    # Merge: isi field yang masih null di LLM dengan regex
+    # Saham & harga
+    for k in ["total_saham_beredar", "harga_penawaran_angka",
+              "total_ekuitas_terakhir", "total_liabilitas_terakhir"]:
+        if llm_result.get(k) is None and regex_result.get(k) is not None:
+            llm_result[k] = regex_result[k]
+
+    # Isi nilai null per tahun dari regex
+    regex_by_year = {str(d.get("tahun","")): d for d in regex_result.get("data_per_tahun", [])}
+    for yr_data in llm_result.get("data_per_tahun", []):
+        y = str(yr_data.get("tahun", ""))
+        if y in regex_by_year:
+            for k in ["pendapatan", "laba_kotor", "laba_usaha", "laba_bersih"]:
+                if yr_data.get(k) is None and regex_by_year[y].get(k) is not None:
+                    yr_data[k] = regex_by_year[y][k]
+
+    return llm_result
+
+# ══════════════════════════════════════════════════════════════════
+# NORMALIZE & COMPUTE KPI
+# ══════════════════════════════════════════════════════════════════
 
 def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict, Dict]:
     unit     = (fin_raw.get("satuan") or "full").lower()
@@ -298,13 +480,12 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
 
     ekuitas    = apply_unit(fin_raw.get("total_ekuitas_terakhir"), unit)
     liabilitas = apply_unit(fin_raw.get("total_liabilitas_terakhir"), unit)
-    # Saham & harga selalu dalam satuan penuh (tidak perlu apply_unit)
     saham      = parse_number(fin_raw.get("total_saham_beredar"))
     harga      = parse_number(fin_raw.get("harga_penawaran_angka"))
 
     revenue_growth, gross_margin, op_margin, ebitda_margin, net_margin = [], [], [], [], []
     prev_rev = None
-    for i, yr in enumerate(years_data):
+    for yr in years_data:
         y   = str(yr.get("tahun",""))
         rev = yr.get("pendapatan")
         gp  = yr.get("laba_kotor")
@@ -357,7 +538,6 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
     except:
         pass
 
-    # Hitung market cap di Python (jangan serahkan ke LLM)
     kpi["market_cap"] = "N/A"
     try:
         if saham and harga and saham > 0 and harga > 0:
@@ -384,22 +564,20 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
     }
     return financial, kpi
 
-def llm_qualitative(text: str, kpi: Dict, financial: Dict, lang: str = "ID") -> Dict:
-    """Analisis non-keuangan: summary, use of funds, risiko, penjamin, benefit."""
+# ══════════════════════════════════════════════════════════════════
+# LLM QUALITATIVE
+# ══════════════════════════════════════════════════════════════════
 
-    is_en = lang.upper() == "EN"
+def llm_qualitative(text: str, kpi: Dict, financial: Dict, lang: str = "ID") -> Dict:
+    is_en    = lang.upper() == "EN"
     currency = financial.get("currency", "IDR")
 
-    # Instruksi bahasa output
     lang_instruction = (
-        "LANGUAGE: Write ALL output (summary, sector, description, risks, benefits, reputation) in ENGLISH. "
-        "Only company_name, ticker, ipo_date stay as-is from the document."
+        "LANGUAGE: Write ALL output in ENGLISH. Only company_name, ticker, ipo_date stay as-is."
     ) if is_en else (
-        "BAHASA: Tulis SEMUA output (summary, sector, description, risks, benefits, reputation) dalam Bahasa Indonesia. "
-        "Hanya company_name, ticker, ipo_date yang tetap dari dokumen."
+        "BAHASA: Tulis SEMUA output dalam Bahasa Indonesia. Hanya company_name, ticker, ipo_date dari dokumen."
     )
 
-    # Format currency sesuai prospektus
     currency_note = f"Gunakan mata uang {currency} sesuai prospektus untuk semua nilai uang."
 
     prompt = f"""Kamu adalah analis IPO senior. Analisis prospektus berikut.
@@ -414,64 +592,35 @@ DATA REFERENSI SUDAH DIHITUNG SISTEM (jangan hitung ulang, salin langsung):
 
 TUGAS — Hasilkan JSON analisis lengkap:
 
-1. IDENTITAS:
-   - company_name: nama lengkap + Tbk (dari dokumen)
-   - ticker: kode saham IDX dari pengetahuanmu (2-6 huruf kapital), kosong "" jika tidak tahu
-   - sector: {'specific sector in English (e.g. "Gold & Mineral Mining")' if is_en else 'sektor spesifik (misal "Pertambangan Emas & Mineral Ikutan")'}
-   - ipo_date: tanggal pencatatan BEI
-   - share_price: harga penawaran final (gunakan {currency})
-   - total_shares: total saham beredar setelah IPO
-   - market_cap: SALIN PERSIS nilai Market Cap dari DATA REFERENSI di atas
+1. IDENTITAS: company_name, ticker (2-6 huruf kapital IDX), sector, ipo_date, share_price, total_shares, market_cap (SALIN PERSIS dari DATA REFERENSI)
 
-2. SUMMARY: 3 paragraf {'in English' if is_en else 'Bahasa Indonesia'} untuk investor awam, spesifik dengan angka dari prospektus.
-   Pisahkan dengan \\n\\n.
+2. SUMMARY: 3 paragraf {'in English' if is_en else 'Bahasa Indonesia'} spesifik dengan angka. Pisahkan dengan \\n\\n.
 
 3. PENGGUNAAN DANA IPO:
-   Cari bagian: "Rencana Penggunaan Dana" / "Penggunaan Dana Hasil Penawaran Umum" / "Use of Proceeds"
-   WAJIB:
-   - Minimal 2 item, maksimal 6 item sesuai dokumen
-   - allocation: persentase PERSIS seperti di dokumen (bukan estimasi/asumsi). Total harus = 100.
+   Cari: "Rencana Penggunaan Dana" / "Use of Proceeds"
+   - Minimal 2 item, maksimal 6 item
+   - allocation: persentase PERSIS dari dokumen, total = 100
    - DILARANG membuat allocation 50/50 atau angka bulat yang tidak ada di dokumen
-   - category & description: {'in English, specific with project names and values in ' + currency if is_en else 'Bahasa Indonesia, spesifik dengan nama proyek dan nilai ' + currency}
 
-4. PENJAMIN EMISI:
-   - lead, others (array), type
-   - reputation: {'analysis of underwriter track record in English' if is_en else 'analisis track record penjamin emisi dalam Bahasa Indonesia'}
+4. PENJAMIN EMISI: lead, others (array), type, reputation
 
-5. RISIKO:
-   - overall_risk_level: "High"/"Medium"/"Low"
-   - overall_risk_reason: {'2-3 sentences in English' if is_en else '2-3 kalimat Bahasa Indonesia'}
-   - risks: 3-5 item, title + desc {'in English' if is_en else 'Bahasa Indonesia'} spesifik
+5. RISIKO: overall_risk_level (High/Medium/Low), overall_risk_reason, risks (3-5 item)
 
-6. BENEFIT: 4-6 keunggulan spesifik dengan angka konkret {'in English' if is_en else 'Bahasa Indonesia'}
+6. BENEFIT: 4-6 keunggulan spesifik dengan angka konkret
 
-ATURAN: Output JSON murni, tidak ada teks lain, tidak ada markdown.
+ATURAN: Output JSON murni tanpa markdown.
 
 DOKUMEN:
 {text[:400000]}
 
 OUTPUT JSON:
 {{
-  "company_name": "...",
-  "ticker": "",
-  "sector": "...",
-  "ipo_date": "...",
-  "share_price": "...",
-  "total_shares": "...",
-  "market_cap": "...",
+  "company_name": "...", "ticker": "", "sector": "...", "ipo_date": "...",
+  "share_price": "...", "total_shares": "...", "market_cap": "...",
   "summary": "...",
-  "use_of_funds": [
-    {{"category": "...", "description": "...", "allocation": 60}},
-    {{"category": "...", "description": "...", "allocation": 40}}
-  ],
-  "underwriter": {{
-    "lead": "...",
-    "others": [],
-    "type": "...",
-    "reputation": "..."
-  }},
-  "overall_risk_level": "Medium",
-  "overall_risk_reason": "...",
+  "use_of_funds": [{{"category": "...", "description": "...", "allocation": 60}}],
+  "underwriter": {{"lead": "...", "others": [], "type": "...", "reputation": "..."}},
+  "overall_risk_level": "Medium", "overall_risk_reason": "...",
   "risks": [{{"level": "Medium", "title": "...", "desc": "..."}}],
   "benefits": [{{"title": "...", "desc": "..."}}]
 }}"""
@@ -510,11 +659,15 @@ OUTPUT JSON:
                     continue
             raise ValueError(f"Tidak bisa parse JSON: {raw[:300]}")
 
+# ══════════════════════════════════════════════════════════════════
+# MAIN ENTRY POINT
+# ══════════════════════════════════════════════════════════════════
+
 def analyze_prospectus(text: str, lang: str = "ID") -> dict:
-    fx_rate  = detect_fx_rate(text)
-    fin_raw  = llm_extract_financials(text)
-    financial, kpi = normalize_and_compute(fin_raw, fx_rate)
-    result   = llm_qualitative(text, kpi, financial, lang=lang)
+    fx_rate          = detect_fx_rate(text)
+    fin_raw          = extract_financials_with_fallback(text)  # LLM + regex fallback
+    financial, kpi   = normalize_and_compute(fin_raw, fx_rate)
+    result           = llm_qualitative(text, kpi, financial, lang=lang)
     result["financial"] = financial
     result["kpi"]       = kpi
     return result
