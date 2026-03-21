@@ -1,470 +1,336 @@
-from openai import OpenAI
-import json, re, os, math
-from decimal import Decimal, InvalidOperation
-from typing import Optional, List, Dict, Any, Tuple
-from dotenv import load_dotenv
+"""
+services/gemini_service.py
+--------------------------
+Analisis prospektus IPO Indonesia secara komprehensif.
+Pipeline:
+  1. Detect metadata dokumen (currency, unit, fx rate)
+  2. LLM multi-chunk — ekstrak data keuangan mentah
+  3. Python — normalisasi + hitung semua KPI
+  4. LLM — analisis kualitatif (summary, risiko, benefit, use of funds)
+  5. Fallback ticker search jika tidak ada di dokumen
 
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
+Output mendukung lang="ID" (Bahasa Indonesia) dan lang="EN" (English).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import math
+import os
+import re
+from typing import Any, Dict, List, Optional, Tuple
+
+from dotenv import load_dotenv
+from openai import OpenAI
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+
+logger = logging.getLogger(__name__)
 
 client = OpenAI(
-    api_key=os.environ.get('SUMOPOD_API_KEY'),
-    base_url="https://ai.sumopod.com/v1"
+    api_key=os.environ.get("SUMOPOD_API_KEY"),
+    base_url="https://ai.sumopod.com/v1",
 )
-
 MODEL = "gemini/gemini-2.5-flash"
 
-# ══════════════════════════════════════════════════════════════════
-# UTIL UMUM
-# ══════════════════════════════════════════════════════════════════
 
-def parse_number(raw: Optional[Any]) -> Optional[float]:
+# ══════════════════════════════════════════════════════════════════════
+# 1. NUMBER UTILITIES
+# ══════════════════════════════════════════════════════════════════════
+
+def parse_num(raw: Any) -> Optional[float]:
+    """Parse angka format Indonesia/Inggris, termasuk (xxx) = negatif."""
     if raw is None:
         return None
     if isinstance(raw, (int, float)):
         return float(raw)
     s = str(raw).strip()
-    if not s or s.lower() in ("null", "n/a", "-"):
+    if not s or s.lower() in ("null", "n/a", "-", ""):
         return None
     neg = False
-    if s.startswith('(') and s.endswith(')'):
-        neg = True
-        s = s[1:-1]
-    elif s.startswith('-'):
-        neg = True
-        s = s[1:]
-    s = re.sub(r'[^0-9\.,]', '', s)
+    if s.startswith("(") and s.endswith(")"):
+        neg, s = True, s[1:-1]
+    elif s.startswith("-"):
+        neg, s = True, s[1:]
+    s = re.sub(r"[^0-9.,]", "", s)
     if not s:
         return None
-    if '.' in s and ',' in s:
-        last_dot   = s.rfind('.')
-        last_comma = s.rfind(',')
-        if last_comma > last_dot:
-            s = s.replace('.', '').replace(',', '.')
-        else:
-            s = s.replace(',', '')
-    elif ',' in s:
-        parts = s.split(',')
-        if len(parts) == 2 and len(parts[1]) <= 2:
-            s = s.replace(',', '.')
-        else:
-            s = s.replace(',', '')
-    elif '.' in s:
-        parts = s.split('.')
-        if len(parts) == 2 and len(parts[1]) <= 2:
-            pass
-        else:
-            s = s.replace('.', '')
+    if "." in s and "," in s:
+        s = s.replace(".", "").replace(",", ".") if s.rfind(",") > s.rfind(".") else s.replace(",", "")
+    elif "," in s:
+        parts = s.split(",")
+        s = s.replace(",", ".") if len(parts) == 2 and len(parts[1]) <= 2 else s.replace(",", "")
+    elif "." in s:
+        parts = s.split(".")
+        if not (len(parts) == 2 and len(parts[1]) <= 2):
+            s = s.replace(".", "")
     try:
         val = float(s)
         return -val if neg else val
     except Exception:
         return None
 
-def to_decimal(s: Optional[str]) -> Optional[Decimal]:
-    if not s:
-        return None
-    try:
-        return Decimal(str(s))
-    except (InvalidOperation, ValueError):
-        return None
 
-def safe_div(a, b) -> Optional[float]:
-    try:
-        a_f, b_f = parse_number(a), parse_number(b)
-        if a_f is None or b_f is None or b_f == 0:
-            return None
-        return a_f / b_f
-    except:
-        return None
-
-def pct(val) -> Optional[float]:
-    if val is None:
-        return None
-    try:
-        v = float(val)
-        return round(v * 100.0, 2) if not math.isnan(v) else None
-    except:
-        return None
-
-def calc_growth(cur, prev) -> Optional[float]:
-    try:
-        c, p = parse_number(cur), parse_number(prev)
-        if c is None or p is None or p == 0:
-            return None
-        return round(((c - p) / abs(p)) * 100, 2)
-    except:
-        return None
-
-def apply_unit(val, unit: str) -> Optional[float]:
-    v = parse_number(val)
+def apply_unit(val: Any, unit: str) -> Optional[float]:
+    v = parse_num(val)
     if v is None:
         return None
-    if unit == "jutaan":
-        return v * 1_000_000
-    if unit == "ribuan":
-        return v * 1_000
-    return v
+    return v * {"jutaan": 1_000_000, "ribuan": 1_000,
+                "miliar": 1_000_000_000, "triliun": 1_000_000_000_000}.get(unit.lower(), 1)
 
-def detect_currency_and_unit(text: str) -> Tuple[str, str]:
-    t = text.lower()
-    currency = "IDR"
-    if "us$" in t or "usd" in t or "dolar amerika" in t:
-        currency = "USD"
-    unit = "full"
-    if re.search(r'dalam\s+jutaan', t):
-        unit = "jutaan"
-    elif re.search(r'dalam\s+ribuan', t):
-        unit = "ribuan"
-    return currency, unit
+
+def safe_div(a: Any, b: Any) -> Optional[float]:
+    try:
+        af, bf = parse_num(a), parse_num(b)
+        return af / bf if af is not None and bf else None
+    except Exception:
+        return None
+
+
+def to_pct(val: Any) -> Optional[float]:
+    v = parse_num(val)
+    return round(v * 100, 2) if v is not None and not math.isnan(v) else None
+
+
+def calc_growth(cur: Any, prev: Any) -> Optional[float]:
+    c, p = parse_num(cur), parse_num(prev)
+    if c is None or p is None or p == 0:
+        return None
+    return round((c - p) / abs(p) * 100, 2)
+
+
+def fmt_idr(value: float) -> str:
+    if value >= 1_000_000_000_000:
+        return f"Rp {value/1_000_000_000_000:.2f} Triliun"
+    if value >= 1_000_000_000:
+        return f"Rp {value/1_000_000_000:.2f} Miliar"
+    return f"Rp {value:,.0f}".replace(",", ".")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 2. DOCUMENT METADATA DETECTION
+# ══════════════════════════════════════════════════════════════════════
+
+def detect_currency(text: str) -> str:
+    t = text[:5000].lower()
+    return "USD" if ("us$" in t or " usd" in t or "dolar amerika" in t) else "IDR"
+
+
+def detect_unit(text: str) -> str:
+    t = text[:10000].lower()
+    if re.search(r"dalam\s+jutaan", t):
+        return "jutaan"
+    if re.search(r"dalam\s+ribuan", t):
+        return "ribuan"
+    if re.search(r"dalam\s+miliar", t):
+        return "miliar"
+    return "full"
+
 
 def detect_fx_rate(text: str) -> Optional[float]:
-    m = re.search(r'kurs.*?rp\s*([0-9\.\,]+)\s*per\s*1\s*(?:dollar|dolar|us\$|usd)', text, flags=re.I)
-    if m:
-        val = parse_number(m.group(1))
-        if val and val > 0:
-            return float(val)
+    for pat in [
+        r"kurs.*?rp\s*([\d.,]+)\s*per\s*1\s*(?:dollar|dolar|us\$|usd)",
+        r"rp\s*([\d.,]+)\s*/\s*us\$",
+        r"exchange\s+rate.*?rp\s*([\d.,]+)",
+    ]:
+        m = re.search(pat, text[:20000], re.I)
+        if m:
+            v = parse_num(m.group(1))
+            if v and v > 1000:
+                return float(v)
     return None
 
-def chunk_text(s: str, max_len: int = 15000, overlap: int = 500) -> List[str]:
-    if not s or len(s) <= max_len:
-        return [s or ""]
-    chunks = []
-    i = 0
-    while i < len(s):
-        chunks.append(s[i:i + max_len])
-        i += max(1, max_len - overlap)
+
+# ══════════════════════════════════════════════════════════════════════
+# 3. LLM FINANCIAL EXTRACTION (MULTI-CHUNK)
+# ══════════════════════════════════════════════════════════════════════
+
+def _chunk_text(text: str, max_len: int = 18000, overlap: int = 800) -> List[str]:
+    if len(text) <= max_len:
+        return [text]
+    chunks, i = [], 0
+    while i < len(text):
+        chunks.append(text[i: i + max_len])
+        i += max_len - overlap
     return chunks
 
-# ══════════════════════════════════════════════════════════════════
-# REGEX FALLBACK — dari ipo_from_prospectus_general.py
-# ══════════════════════════════════════════════════════════════════
 
-def _grab_first_number(line: str) -> Optional[Decimal]:
-    m = re.search(r"[-]?\d[\d\.\,]*", line)
-    if not m:
-        return None
-    token = m.group(0).strip().replace("−", "-")
-    token = re.sub(r"[^0-9\.\-]", "", token.replace(",", "."))
-    try:
-        return Decimal(token)
-    except:
-        return None
-
-def regex_extract_financials(text: str) -> Dict[str, Any]:
-    """
-    Fallback: ekstrak data keuangan via regex dari teks prospektus.
-    Mengembalikan format yang kompatibel dengan normalize_and_compute().
-    """
-    rev_by_year: Dict[str, Optional[float]] = {}
-    gp_by_year:  Dict[str, Optional[float]] = {}
-    op_by_year:  Dict[str, Optional[float]] = {}
-    ni_by_year:  Dict[str, Optional[float]] = {}
-    eq_by_year:  Dict[str, Optional[float]] = {}
-    lb_by_year:  Dict[str, Optional[float]] = {}
-
-    lines = text.splitlines()
-    for ln in lines:
-        l = ln.lower()
-        yr_m = re.search(r"(20\d{2})", ln)
-        yr = yr_m.group(1) if yr_m else None
-        val = _grab_first_number(ln)
-        if val is None:
-            continue
-        fval = float(val)
-
-        if "pendapatan" in l or "revenue" in l or "penjualan" in l:
-            if yr and yr not in rev_by_year:
-                rev_by_year[yr] = fval
-        if "laba kotor" in l or "gross profit" in l:
-            if yr and yr not in gp_by_year:
-                gp_by_year[yr] = fval
-        if ("laba usaha" in l or "rugi usaha" in l or
-                "operating profit" in l or "operating income" in l):
-            if yr and yr not in op_by_year:
-                op_by_year[yr] = fval
-        if ("laba bersih" in l or "rugi bersih" in l or
-                "laba periode" in l or "rugi periode" in l or
-                "net profit" in l or "net income" in l or
-                "loss for the period" in l):
-            if yr and yr not in ni_by_year:
-                ni_by_year[yr] = fval
-        if "jumlah ekuitas" in l or "total equity" in l:
-            if yr and yr not in eq_by_year:
-                eq_by_year[yr] = fval
-        if "jumlah liabilitas" in l or "total liabilit" in l:
-            if yr and yr not in lb_by_year:
-                lb_by_year[yr] = fval
-
-    # Ambil semua tahun yang ditemukan
-    all_years = sorted(set(
-        list(rev_by_year.keys()) + list(gp_by_year.keys()) +
-        list(op_by_year.keys())  + list(ni_by_year.keys())
-    ))
-
-    if not all_years:
-        return {}
-
-    data_per_tahun = []
-    for y in all_years:
-        data_per_tahun.append({
-            "tahun":       y,
-            "pendapatan":  rev_by_year.get(y),
-            "laba_kotor":  gp_by_year.get(y),
-            "laba_usaha":  op_by_year.get(y),
-            "laba_bersih": ni_by_year.get(y),
-            "depresiasi":  None,
-        })
-
-    # Ekuitas & liabilitas tahun terakhir
-    last_eq = eq_by_year.get(all_years[-1]) if eq_by_year else None
-    last_lb = lb_by_year.get(all_years[-1]) if lb_by_year else None
-
-    # Saham & harga via regex
-    saham = None
-    for pat in [
-        r"jumlah\s+saham\s+(?:yang\s+)?(?:akan\s+)?dicatatkan.*?(\d{1,3}(?:\.\d{3})+)",
-        r"jumlah\s+saham\s+beredar\s+setelah\s+IPO.*?(\d{1,3}(?:\.\d{3})+)",
-        r"(\d{1,3}(?:\.\d{3}){3,})\s*saham.*?dicatatkan",
-    ]:
-        m = re.search(pat, text, re.I | re.S)
-        if m:
-            s = re.sub(r"[^\d]", "", m.group(1))
-            try:
-                saham = int(s)
+def _safe_json(raw: str) -> Optional[dict]:
+    raw = raw.strip()
+    if "```" in raw:
+        for part in raw.split("```"):
+            part = part.strip().lstrip("json").strip()
+            if part.startswith("{"):
+                raw = part
                 break
-            except:
-                pass
+    s, e = raw.find("{"), raw.rfind("}")
+    if s == -1 or e <= s:
+        return None
+    snippet = raw[s: e + 1]
+    for attempt in [snippet, re.sub(r",\s*([}\]])", r"\1", snippet)]:
+        try:
+            return json.loads(attempt)
+        except Exception:
+            pass
+    return None
 
-    harga = None
-    for pat in [
-        r"Harga\s+Penawaran\s*:?\s*Rp\s*([\d\.]+)",
-        r"Offering\s+Price\s*:?\s*Rp\s*([\d\.]+)",
-    ]:
-        m = re.search(pat, text, re.I)
-        if m:
-            h = re.sub(r"[^\d]", "", m.group(1))
-            try:
-                harga = int(h)
-                break
-            except:
-                pass
 
-    currency, unit = detect_currency_and_unit(text)
+_FIN_KEYWORDS = [
+    "laporan laba rugi", "ikhtisar data keuangan", "data keuangan penting",
+    "ringkasan keuangan", "informasi keuangan", "laba kotor", "laba usaha",
+    "laba bersih", "pendapatan usaha", "pendapatan bersih", "penjualan bersih",
+    "posisi keuangan", "neraca", "ekuitas", "liabilitas",
+    "gross profit", "net revenue", "operating profit", "net income",
+    "profit or loss", "statement of profit", "balance sheet",
+    "selected financial", "financial highlights",
+]
 
-    return {
-        "satuan":                   unit,
-        "mata_uang":                currency,
-        "tahun_tersedia":           all_years,
-        "data_per_tahun":           data_per_tahun,
-        "total_ekuitas_terakhir":   last_eq,
-        "total_liabilitas_terakhir":last_lb,
-        "total_saham_beredar":      saham,
-        "harga_penawaran_angka":    harga,
-    }
+_FIN_SYSTEM = """Kamu adalah akuntan senior Indonesia. Ekstrak data keuangan dari potongan prospektus IPO.
+Output HANYA JSON murni — tanpa teks lain, tanpa markdown.
 
-# ══════════════════════════════════════════════════════════════════
-# LLM EXTRACT FINANCIALS
-# ══════════════════════════════════════════════════════════════════
+INSTRUKSI EKSTRAKSI:
+1. Cari tabel laporan keuangan dengan judul seperti:
+   "LAPORAN LABA RUGI", "DATA KEUANGAN PENTING", "IKHTISAR DATA KEUANGAN",
+   "SELECTED FINANCIAL DATA", "CONSOLIDATED STATEMENTS OF PROFIT OR LOSS",
+   "RINGKASAN KEUANGAN", "INFORMASI KEUANGAN RINGKAS"
 
-def llm_extract_financials(text: str) -> Dict[str, Any]:
-    sys_prompt = """Kamu adalah akuntan Indonesia. Tugasmu: ekstrak angka keuangan mentah dari potongan prospektus IPO.
-Output HANYA JSON murni — tidak ada teks penjelasan, tidak ada markdown.
+2. Baca header kolom tabel — itulah tahun-tahun tersedia (contoh: 2021, 2022, 2023, 2024).
+   Masukkan SEMUA tahun ke "tahun_tersedia" dan buat entry per tahun di "data_per_tahun".
 
-LANGKAH EKSTRAKSI:
-1. Temukan tabel laporan keuangan. Judulnya bisa:
-   - "LAPORAN LABA RUGI DAN PENGHASILAN KOMPREHENSIF LAIN KONSOLIDASIAN"
-   - "DATA KEUANGAN PENTING" / "IKHTISAR DATA KEUANGAN PENTING"
-   - "Ringkasan Keuangan" / "Informasi Keuangan Ringkas"
-   - "CONSOLIDATED STATEMENTS OF PROFIT OR LOSS"
-   - "SELECTED FINANCIAL DATA"
-
-2. Baca header kolom tabel → itulah daftar tahun yang tersedia (misal: 2021, 2022, 2023, 2024).
-   Masukkan SEMUA tahun ke "tahun_tersedia" dan buat satu entry per tahun di "data_per_tahun".
-
-3. Untuk setiap tahun, catat:
-   - pendapatan   : Total Pendapatan / Revenue / Net Revenue
+3. Untuk setiap tahun, ekstrak:
+   - pendapatan   : Total Pendapatan / Revenue / Penjualan Bersih / Net Revenue
    - laba_kotor   : Laba Kotor / Gross Profit
-   - laba_usaha   : Laba Usaha / Operating Profit (bisa negatif)
-   - laba_bersih  : Laba Bersih / Net Profit (bisa negatif)
-   - depresiasi   : Depresiasi & Amortisasi (isi null jika tidak ada)
+   - laba_usaha   : Laba / Rugi Usaha / Operating Profit/Loss (bisa negatif)
+   - laba_bersih  : Laba / Rugi Bersih / Net Profit/Loss (bisa negatif)
+   - depresiasi   : Depresiasi & Amortisasi (null jika tidak ada)
 
 4. Catat satuan dari header tabel:
-   - "dalam jutaan Rupiah" → satuan = "jutaan"
-   - "dalam ribuan" → satuan = "ribuan"
-   - tidak ada keterangan → satuan = "full"
+   "dalam jutaan Rupiah" → satuan="jutaan"
+   "dalam ribuan" → satuan="ribuan"
+   "dalam miliar" → satuan="miliar"
+   Tidak ada keterangan → satuan="full"
 
-5. Tulis angka PERSIS seperti di dokumen — JANGAN konversi ke satuan lain.
-   Angka dalam kurung misal (1.234) artinya negatif → tulis -1234.
+5. Tulis angka PERSIS seperti di dokumen — JANGAN konversi satuan.
+   Angka negatif dalam kurung (1.234) → tulis -1234.
 
-6. Dari Laporan Posisi Keuangan / Neraca, ambil data tahun TERAKHIR:
-   - total_ekuitas_terakhir
-   - total_liabilitas_terakhir
+6. Dari neraca/posisi keuangan, ambil tahun TERAKHIR:
+   - total_ekuitas, total_liabilitas, total_aset
 
-7. Cari juga:
+7. Cari:
    - total_saham_beredar: jumlah saham beredar SETELAH IPO
-   - harga_penawaran_angka: harga per saham (angka saja, tanpa "Rp")
+   - harga_penawaran: harga per saham (angka saja, tanpa "Rp")
 
-8. Jika potongan ini tidak mengandung data keuangan → isi null atau [].
+8. Jika potongan ini tidak ada data keuangan → isi null/[]
 
-OUTPUT JSON:
+OUTPUT JSON WAJIB PERSIS FORMAT INI:
 {
   "satuan": "jutaan",
   "mata_uang": "IDR",
-  "tahun_tersedia": ["2022", "2023", "2024"],
+  "tahun_tersedia": ["2022","2023","2024"],
   "data_per_tahun": [
-    {"tahun": "2022", "pendapatan": null, "laba_kotor": null, "laba_usaha": null, "laba_bersih": null, "depresiasi": null},
-    {"tahun": "2023", "pendapatan": null, "laba_kotor": null, "laba_usaha": null, "laba_bersih": null, "depresiasi": null},
-    {"tahun": "2024", "pendapatan": null, "laba_kotor": null, "laba_usaha": null, "laba_bersih": null, "depresiasi": null}
+    {"tahun":"2022","pendapatan":null,"laba_kotor":null,"laba_usaha":null,"laba_bersih":null,"depresiasi":null},
+    {"tahun":"2023","pendapatan":null,"laba_kotor":null,"laba_usaha":null,"laba_bersih":null,"depresiasi":null},
+    {"tahun":"2024","pendapatan":null,"laba_kotor":null,"laba_usaha":null,"laba_bersih":null,"depresiasi":null}
   ],
-  "total_ekuitas_terakhir": null,
-  "total_liabilitas_terakhir": null,
+  "total_ekuitas": null,
+  "total_liabilitas": null,
+  "total_aset": null,
   "total_saham_beredar": null,
-  "harga_penawaran_angka": null
+  "harga_penawaran": null
 }"""
 
-    merged = {
+
+def llm_extract_financials(text: str) -> Dict[str, Any]:
+    """Multi-chunk LLM extraction untuk data keuangan."""
+    merged: Dict[str, Any] = {
         "satuan": None, "mata_uang": None,
         "tahun_tersedia": [], "data_per_tahun": [],
-        "total_ekuitas_terakhir": None, "total_liabilitas_terakhir": None,
-        "total_saham_beredar": None, "harga_penawaran_angka": None
+        "total_ekuitas": None, "total_liabilitas": None, "total_aset": None,
+        "total_saham_beredar": None, "harga_penawaran": None,
     }
 
-    chunks = chunk_text(text, max_len=15000, overlap=500)
-    priority_chunks = []
-    keywords = [
-        "laporan laba rugi", "ikhtisar data keuangan", "data keuangan penting",
-        "ringkasan keuangan", "pendapatan bersih", "laba kotor", "laba usaha",
-        "laba bersih", "pendapatan usaha", "penjualan bersih",
-        "gross profit", "net revenue", "operating profit", "net income",
-        "profit or loss", "statement of profit",
-    ]
-    for c in chunks:
+    all_chunks = _chunk_text(text, max_len=18000, overlap=800)
+
+    # Pilih chunk prioritas berdasarkan keywords keuangan
+    priority, others = [], []
+    for c in all_chunks:
         cl = c.lower()
         if "daftar isi" in cl and cl.count("halaman") > 5:
             continue
-        if any(k in cl for k in keywords):
-            priority_chunks.append(c)
-    if chunks and chunks[0] not in priority_chunks:
-        priority_chunks.insert(0, chunks[0])
-    if len(chunks) > 1 and chunks[-1] not in priority_chunks:
-        priority_chunks.append(chunks[-1])
-    selected_chunks = priority_chunks[:8]
+        if any(k in cl for k in _FIN_KEYWORDS):
+            priority.append(c)
+        else:
+            others.append(c)
 
-    def safe_json(s: str) -> Optional[dict]:
-        s = s.strip()
-        if "```" in s:
-            for p in s.split("```"):
-                p = p.strip().lstrip("json").strip()
-                if p.startswith("{"):
-                    s = p
-                    break
-        si = s.find("{")
-        ei = s.rfind("}")
-        if si != -1 and ei > si:
-            try:
-                return json.loads(s[si:ei+1])
-            except:
-                fixed = re.sub(r',\s*([}\]])', r'\1', s[si:ei+1])
-                try:
-                    return json.loads(fixed)
-                except:
-                    return None
-        return None
+    # Sertakan chunk tengah dokumen (sering berisi tabel keuangan)
+    mid = len(others) // 2
+    selected = list(priority[:8])
+    for c in others[max(0, mid - 1): mid + 2]:
+        if c not in selected:
+            selected.append(c)
+    # Selalu sertakan chunk pertama & terakhir
+    if all_chunks and all_chunks[0] not in selected:
+        selected.insert(0, all_chunks[0])
+    if len(all_chunks) > 1 and all_chunks[-1] not in selected:
+        selected.append(all_chunks[-1])
 
-    for chunk in selected_chunks:
+    selected = selected[:10]
+
+    for chunk in selected:
         try:
             resp = client.chat.completions.create(
-                model=MODEL,
-                temperature=0.01,
-                max_tokens=3000,
+                model=MODEL, temperature=0.01, max_tokens=4000,
                 messages=[
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user",   "content": f"DOKUMEN:\n{chunk}"}
-                ]
+                    {"role": "system", "content": _FIN_SYSTEM},
+                    {"role": "user", "content": f"DOKUMEN:\n{chunk}"},
+                ],
             )
-            part = safe_json(resp.choices[0].message.content) or {}
-        except Exception:
+            part = _safe_json(resp.choices[0].message.content) or {}
+        except Exception as e:
+            logger.warning(f"LLM financial chunk error: {e}")
             part = {}
 
-        if not merged["satuan"] and part.get("satuan"):
-            merged["satuan"] = part["satuan"]
-        if not merged["mata_uang"] and part.get("mata_uang"):
-            merged["mata_uang"] = part["mata_uang"]
+        # Merge metadata
+        for k in ("satuan", "mata_uang"):
+            if not merged[k] and part.get(k):
+                merged[k] = part[k]
+
+        # Merge tahun
         if part.get("tahun_tersedia"):
-            merged["tahun_tersedia"] = sorted(list(set(merged["tahun_tersedia"]) | set(part["tahun_tersedia"])))
+            merged["tahun_tersedia"] = sorted(
+                set(merged["tahun_tersedia"]) | set(str(y) for y in part["tahun_tersedia"])
+            )
+
+        # Merge data per tahun
         if part.get("data_per_tahun"):
-            m_dict = {str(d.get("tahun","")).strip(): d for d in merged["data_per_tahun"] if str(d.get("tahun","")).strip()}
+            m_dict = {str(d.get("tahun", "")).strip(): d for d in merged["data_per_tahun"]}
             for d in part["data_per_tahun"]:
-                y = str(d.get("tahun","")).strip()
+                y = str(d.get("tahun", "")).strip()
                 if not y:
                     continue
                 if y in m_dict:
-                    for k in ["pendapatan","laba_kotor","laba_usaha","laba_bersih","depresiasi"]:
-                        val = d.get(k)
-                        if m_dict[y].get(k) is None and val is not None and str(val).strip() not in ("null",""):
-                            m_dict[y][k] = val
+                    for k in ("pendapatan", "laba_kotor", "laba_usaha", "laba_bersih", "depresiasi"):
+                        v = d.get(k)
+                        if m_dict[y].get(k) is None and v is not None and str(v).strip() not in ("null", ""):
+                            m_dict[y][k] = v
                 else:
                     m_dict[y] = d
             merged["data_per_tahun"] = [m_dict[k] for k in sorted(m_dict.keys())]
-        for k in ["total_ekuitas_terakhir","total_liabilitas_terakhir","total_saham_beredar","harga_penawaran_angka"]:
-            val = part.get(k)
-            if merged.get(k) is None and val is not None and str(val).strip() not in ("null",""):
-                merged[k] = val
+
+        # Merge scalar fields
+        for k in ("total_ekuitas", "total_liabilitas", "total_aset",
+                  "total_saham_beredar", "harga_penawaran"):
+            v = part.get(k)
+            if merged.get(k) is None and v is not None and str(v).strip() not in ("null", ""):
+                merged[k] = v
 
     return merged
 
-# ══════════════════════════════════════════════════════════════════
-# MERGE LLM + REGEX (LLM prioritas, regex sebagai fallback)
-# ══════════════════════════════════════════════════════════════════
 
-def _has_financial_data(fin_raw: Dict) -> bool:
-    """Cek apakah hasil LLM punya data keuangan yang bermakna."""
-    years = fin_raw.get("data_per_tahun", [])
-    if not years:
-        return False
-    for yr in years:
-        for k in ["pendapatan", "laba_kotor", "laba_usaha", "laba_bersih"]:
-            if yr.get(k) is not None:
-                return True
-    return False
-
-def extract_financials_with_fallback(text: str) -> Dict[str, Any]:
-    """
-    1. Coba LLM dulu (lebih akurat untuk tabel kompleks)
-    2. Jika LLM tidak dapat data → pakai regex fallback
-    3. Merge: field yang masih null di LLM diisi dari regex
-    """
-    llm_result = llm_extract_financials(text)
-    regex_result = regex_extract_financials(text)
-
-    if not regex_result:
-        return llm_result
-
-    if not _has_financial_data(llm_result):
-        # LLM gagal total → pakai regex sepenuhnya
-        return regex_result
-
-    # Merge: isi field yang masih null di LLM dengan regex
-    # Saham & harga
-    for k in ["total_saham_beredar", "harga_penawaran_angka",
-              "total_ekuitas_terakhir", "total_liabilitas_terakhir"]:
-        if llm_result.get(k) is None and regex_result.get(k) is not None:
-            llm_result[k] = regex_result[k]
-
-    # Isi nilai null per tahun dari regex
-    regex_by_year = {str(d.get("tahun","")): d for d in regex_result.get("data_per_tahun", [])}
-    for yr_data in llm_result.get("data_per_tahun", []):
-        y = str(yr_data.get("tahun", ""))
-        if y in regex_by_year:
-            for k in ["pendapatan", "laba_kotor", "laba_usaha", "laba_bersih"]:
-                if yr_data.get(k) is None and regex_by_year[y].get(k) is not None:
-                    yr_data[k] = regex_by_year[y][k]
-
-    return llm_result
-
-# ══════════════════════════════════════════════════════════════════
-# NORMALIZE & COMPUTE KPI
-# ══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════
+# 4. NORMALIZE + COMPUTE ALL KPIs
+# ══════════════════════════════════════════════════════════════════════
 
 def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict, Dict]:
     unit     = (fin_raw.get("satuan") or "full").lower()
@@ -473,20 +339,22 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
     years_data = []
     for d in fin_raw.get("data_per_tahun", []):
         nd = dict(d)
-        for k in ["pendapatan","laba_kotor","laba_usaha","laba_bersih","depresiasi"]:
+        for k in ("pendapatan", "laba_kotor", "laba_usaha", "laba_bersih", "depresiasi"):
             nd[k] = apply_unit(nd.get(k), unit) if nd.get(k) is not None else None
         years_data.append(nd)
-    years_data = sorted(years_data, key=lambda x: x.get("tahun",""))
+    years_data.sort(key=lambda x: str(x.get("tahun", "")))
 
-    ekuitas    = apply_unit(fin_raw.get("total_ekuitas_terakhir"), unit)
-    liabilitas = apply_unit(fin_raw.get("total_liabilitas_terakhir"), unit)
-    saham      = parse_number(fin_raw.get("total_saham_beredar"))
-    harga      = parse_number(fin_raw.get("harga_penawaran_angka"))
+    ekuitas    = apply_unit(fin_raw.get("total_ekuitas"), unit)
+    liabilitas = apply_unit(fin_raw.get("total_liabilitas"), unit)
+    saham      = parse_num(fin_raw.get("total_saham_beredar"))
+    harga      = parse_num(fin_raw.get("harga_penawaran"))
+    harga_idr  = harga * fx_rate if (harga and currency == "USD" and fx_rate) else harga
 
+    # Chart series
     revenue_growth, gross_margin, op_margin, ebitda_margin, net_margin = [], [], [], [], []
     prev_rev = None
     for yr in years_data:
-        y   = str(yr.get("tahun",""))
+        y   = str(yr.get("tahun", ""))
         rev = yr.get("pendapatan")
         gp  = yr.get("laba_kotor")
         op  = yr.get("laba_usaha")
@@ -495,179 +363,345 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
 
         revenue_growth.append({"year": y, "value": 0.0 if prev_rev is None else calc_growth(rev, prev_rev)})
         prev_rev = rev
-        gross_margin.append({"year": y, "value": pct(safe_div(gp, rev))})
-        op_margin.append({"year": y, "value": pct(safe_div(op, rev))})
-        if dep is not None and op is not None and rev:
-            ebitda_margin.append({"year": y, "value": pct(safe_div(float(op)+float(dep), rev))})
-        else:
-            ebitda_margin.append({"year": y, "value": None})
-        net_margin.append({"year": y, "value": pct(safe_div(net, rev))})
+        gross_margin.append({"year": y, "value": to_pct(safe_div(gp, rev))})
+        op_margin.append({"year": y, "value": to_pct(safe_div(op, rev))})
+        ebitda_margin.append({
+            "year": y,
+            "value": to_pct(safe_div(float(op) + float(dep), rev))
+            if (dep is not None and op is not None and rev) else None
+        })
+        net_margin.append({"year": y, "value": to_pct(safe_div(net, rev))})
 
-    kpi = {"pe": "N/A", "pb": "N/A", "roe": "N/A", "der": "N/A", "eps": "N/A"}
-    laba_bersih = years_data[-1].get("laba_bersih") if years_data else None
+    # KPI
+    kpi = {"pe": "N/A", "pb": "N/A", "roe": "N/A", "der": "N/A", "eps": "N/A", "market_cap": "N/A"}
+    laba_last = years_data[-1].get("laba_bersih") if years_data else None
 
     try:
-        if saham and laba_bersih and saham > 0:
-            eps_val = laba_bersih / saham
-            kpi["eps"] = f"Rp {eps_val:,.2f}".replace(",",".") if currency=="IDR" else f"USD {eps_val:.6f}"
-            if harga and eps_val != 0:
-                price_ccy = harga / fx_rate if (currency == "USD" and fx_rate and fx_rate > 0) else harga
-                pe = price_ccy / eps_val
-                kpi["pe"] = f"{pe:.1f}x" if pe > 0 else "N/A (Rugi)"
-    except:
+        if saham and laba_last and saham > 0:
+            eps_val = laba_last / saham
+            kpi["eps"] = f"Rp {eps_val:,.2f}".replace(",", ".") if currency == "IDR" else f"{currency} {eps_val:.4f}"
+            if harga_idr and eps_val > 0:
+                kpi["pe"] = f"{harga_idr / eps_val:.1f}x"
+            elif harga_idr and eps_val < 0:
+                kpi["pe"] = "N/A (Rugi)"
+    except Exception:
         pass
 
     try:
-        if ekuitas and saham and saham > 0 and harga:
+        if ekuitas and saham and saham > 0 and harga_idr and ekuitas > 0:
             bvps = ekuitas / saham
             if bvps > 0:
-                price_ccy = harga / (fx_rate or 1) if currency=="USD" else harga
-                kpi["pb"] = f"{price_ccy/bvps:.2f}x"
-    except:
+                kpi["pb"] = f"{harga_idr / bvps:.2f}x"
+    except Exception:
         pass
 
     try:
-        if ekuitas and laba_bersih and ekuitas > 0:
-            kpi["roe"] = f"{(laba_bersih/ekuitas)*100:.1f}%"
-    except:
+        if ekuitas and laba_last and ekuitas > 0:
+            kpi["roe"] = f"{laba_last / ekuitas * 100:.1f}%"
+    except Exception:
         pass
 
     try:
         if ekuitas and liabilitas and ekuitas > 0:
-            kpi["der"] = f"{liabilitas/ekuitas:.2f}x"
-    except:
+            kpi["der"] = f"{liabilitas / ekuitas:.2f}x"
+    except Exception:
         pass
 
-    kpi["market_cap"] = "N/A"
     try:
         if saham and harga and saham > 0 and harga > 0:
-            mc = saham * harga
-            if currency == "IDR":
-                if mc >= 1_000_000_000_000:
-                    kpi["market_cap"] = f"Rp {mc/1_000_000_000_000:.2f} Triliun"
-                else:
-                    kpi["market_cap"] = f"Rp {mc/1_000_000_000:.2f} Miliar"
-            else:
-                kpi["market_cap"] = f"USD {mc:,.0f}"
-    except:
+            mc = saham * (harga_idr if harga_idr else harga)
+            kpi["market_cap"] = fmt_idr(mc)
+    except Exception:
         pass
 
     financial = {
         "currency":          currency,
-        "years":             [str(d.get("tahun","")) for d in years_data],
+        "years":             [str(d.get("tahun", "")) for d in years_data],
         "absolute_data":     years_data,
         "revenue_growth":    revenue_growth or None,
-        "gross_margin":      gross_margin   or None,
-        "operating_margin":  op_margin      or None,
-        "ebitda_margin":     ebitda_margin  or None,
-        "net_profit_margin": net_margin     or None,
+        "gross_margin":      gross_margin or None,
+        "operating_margin":  op_margin or None,
+        "ebitda_margin":     ebitda_margin or None,
+        "net_profit_margin": net_margin or None,
     }
     return financial, kpi
 
-# ══════════════════════════════════════════════════════════════════
-# LLM QUALITATIVE
-# ══════════════════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════════════════════
+# 5. LLM QUALITATIVE ANALYSIS
+# ══════════════════════════════════════════════════════════════════════
 
 def llm_qualitative(text: str, kpi: Dict, financial: Dict, lang: str = "ID") -> Dict:
     is_en    = lang.upper() == "EN"
     currency = financial.get("currency", "IDR")
+    years    = financial.get("years", [])
 
-    lang_instruction = (
-        "LANGUAGE: Write ALL output in ENGLISH. Only company_name, ticker, ipo_date stay as-is."
+    lang_rule = (
+        "OUTPUT LANGUAGE: Write ALL text fields in ENGLISH. "
+        "company_name stays as original from document."
     ) if is_en else (
-        "BAHASA: Tulis SEMUA output dalam Bahasa Indonesia. Hanya company_name, ticker, ipo_date dari dokumen."
+        "BAHASA OUTPUT: Tulis SEMUA field teks dalam Bahasa Indonesia. "
+        "company_name tetap asli dari dokumen."
     )
 
-    currency_note = f"Gunakan mata uang {currency} sesuai prospektus untuk semua nilai uang."
+    prompt = f"""Kamu adalah analis IPO senior Indonesia. Analisis prospektus IPO berikut secara mendalam dan akurat.
 
-    prompt = f"""Kamu adalah analis IPO senior. Analisis prospektus berikut.
+{lang_rule}
+Gunakan mata uang {currency} untuk semua nilai uang.
 
-{lang_instruction}
-{currency_note}
+DATA KPI SUDAH DIHITUNG SISTEM — SALIN PERSIS, JANGAN HITUNG ULANG:
+{json.dumps(kpi, ensure_ascii=False)}
+Tahun data keuangan tersedia: {years}
 
-DATA REFERENSI SUDAH DIHITUNG SISTEM (jangan hitung ulang, salin langsung):
-- Market Cap  : {kpi.get('market_cap', 'N/A')}
-- KPI Lengkap : {json.dumps(kpi, ensure_ascii=False)}
-- Tahun data  : {financial.get('years', [])}
+════ INSTRUKSI ANALISIS ════
 
-TUGAS — Hasilkan JSON analisis lengkap:
+A. IDENTITAS PERUSAHAAN
+   company_name : nama lengkap perusahaan termasuk "Tbk"
+   ticker       : kode saham IDX. Cari di dokumen dengan pola PERSIS:
+                  "Kode Saham:", "Kode Efek:", "Stock Code:", "kode saham adalah",
+                  "akan dicatatkan dengan kode", "kode perdagangan"
+                  → Jika ada di dokumen, WAJIB diisi. Jika tidak ada → kosongkan ""
+   sector       : sektor bisnis spesifik (misal: "Pertambangan Emas", "Perbankan", "Teknologi")
+   ipo_date     : tanggal PENCATATAN di BEI (bukan tanggal penawaran)
+   share_price  : harga penawaran final
+   total_shares : total saham beredar setelah IPO
+   market_cap   : SALIN PERSIS dari DATA KPI di atas
 
-1. IDENTITAS: company_name, ticker (2-6 huruf kapital IDX), sector, ipo_date, share_price, total_shares, market_cap (SALIN PERSIS dari DATA REFERENSI)
+B. RINGKASAN (summary) — 3 paragraf spesifik {'in English' if is_en else 'Bahasa Indonesia'}:
+   Paragraf 1: Profil perusahaan, bisnis utama, skala operasi, lokasi, jumlah karyawan/aset
+   Paragraf 2: Detail IPO — jumlah saham ditawarkan, persentase dari modal, harga, total dana IPO
+   Paragraf 3: Kondisi keuangan terkini, pertumbuhan revenue, profitabilitas, prospek ke depan
+   Pisahkan paragraf dengan \\n\\n
 
-2. SUMMARY: 3 paragraf {'in English' if is_en else 'Bahasa Indonesia'} spesifik dengan angka. Pisahkan dengan \\n\\n.
+C. PENGGUNAAN DANA (use_of_funds)
+   Cari bagian: "Rencana Penggunaan Dana" / "Penggunaan Dana Hasil Penawaran Umum" / "Use of Proceeds"
+   - Ekstrak SEMUA item alokasi (2-6 item sesuai dokumen)
+   - allocation: angka persentase PERSIS dari dokumen. Total HARUS = 100.
+   - DILARANG mengarang persentase. Jika tidak ada % eksplisit, hitung dari nominal.
+   - DILARANG membuat allocation semua 0 jika ada data di dokumen
+   - description: spesifik dengan nama proyek, lokasi, nilai nominal
 
-3. PENGGUNAAN DANA IPO:
-   Cari: "Rencana Penggunaan Dana" / "Use of Proceeds"
-   - Minimal 2 item, maksimal 6 item
-   - allocation: persentase PERSIS dari dokumen, total = 100
-   - DILARANG membuat allocation 50/50 atau angka bulat yang tidak ada di dokumen
+D. PENJAMIN EMISI (underwriter)
+   lead       : nama penjamin pelaksana emisi efek utama
+   others     : array nama penjamin lain (bisa kosong [])
+   type       : "Full Commitment" atau "Best Efforts"
+   reputation : analisis singkat track record penjamin 2-3 kalimat {'in English' if is_en else 'Bahasa Indonesia'}
 
-4. PENJAMIN EMISI: lead, others (array), type, reputation
+E. ANALISIS RISIKO
+   overall_risk_level  : "High", "Medium", atau "Low" berdasarkan kondisi nyata perusahaan
+   overall_risk_reason : 2-3 kalimat alasan utama
+   risks               : 4-5 risiko SPESIFIK dari bab Faktor Risiko di dokumen
+     - level: "High", "Medium", atau "Low"
+     - title: judul singkat risiko
+     - desc: penjelasan 1-2 kalimat dengan angka/fakta konkret
 
-5. RISIKO: overall_risk_level (High/Medium/Low), overall_risk_reason, risks (3-5 item)
+F. KEUNGGULAN INVESTASI (benefits)
+   4-6 keunggulan kompetitif SPESIFIK dari dokumen, dengan data/angka konkret
+   - title: judul singkat
+   - desc: penjelasan 1-2 kalimat dengan fakta konkret
 
-6. BENEFIT: 4-6 keunggulan spesifik dengan angka konkret
+ATURAN PENTING:
+- Output HANYA JSON murni, TANPA markdown, TANPA teks lain
+- Semua string field wajib diisi (gunakan "" jika tidak ada, BUKAN null)
+- risks[].level dan overall_risk_level HARUS salah satu dari: "High", "Medium", "Low"
+- use_of_funds[].allocation adalah NUMBER (angka), BUKAN string
 
-ATURAN: Output JSON murni tanpa markdown.
-
-DOKUMEN:
-{text[:400000]}
+DOKUMEN PROSPEKTUS:
+{text[:380000]}
 
 OUTPUT JSON:
 {{
-  "company_name": "...", "ticker": "", "sector": "...", "ipo_date": "...",
-  "share_price": "...", "total_shares": "...", "market_cap": "...",
+  "company_name": "PT ... Tbk",
+  "ticker": "",
+  "sector": "...",
+  "ipo_date": "...",
+  "share_price": "...",
+  "total_shares": "...",
+  "market_cap": "...",
   "summary": "...",
-  "use_of_funds": [{{"category": "...", "description": "...", "allocation": 60}}],
-  "underwriter": {{"lead": "...", "others": [], "type": "...", "reputation": "..."}},
-  "overall_risk_level": "Medium", "overall_risk_reason": "...",
-  "risks": [{{"level": "Medium", "title": "...", "desc": "..."}}],
-  "benefits": [{{"title": "...", "desc": "..."}}]
+  "use_of_funds": [
+    {{"category": "...", "description": "...", "allocation": 60}},
+    {{"category": "...", "description": "...", "allocation": 40}}
+  ],
+  "underwriter": {{
+    "lead": "...",
+    "others": [],
+    "type": "Full Commitment",
+    "reputation": "..."
+  }},
+  "overall_risk_level": "Medium",
+  "overall_risk_reason": "...",
+  "risks": [
+    {{"level": "High", "title": "...", "desc": "..."}},
+    {{"level": "Medium", "title": "...", "desc": "..."}}
+  ],
+  "benefits": [
+    {{"title": "...", "desc": "..."}},
+    {{"title": "...", "desc": "..."}}
+  ]
 }}"""
 
     resp = client.chat.completions.create(
-        model=MODEL,
-        temperature=0.1,
-        max_tokens=12000,
-        messages=[{"role": "user", "content": prompt}]
+        model=MODEL, temperature=0.1, max_tokens=12000,
+        messages=[{"role": "user", "content": prompt}],
     )
 
-    raw = resp.choices[0].message.content.strip()
-    if "```" in raw:
-        for p in raw.split("```"):
-            p = p.strip().lstrip("json").strip()
-            if p.startswith("{"):
-                raw = p
-                break
+    raw    = resp.choices[0].message.content.strip()
+    result = _safe_json(raw)
+    if result:
+        return result
 
-    s = raw.find("{")
-    e = raw.rfind("}") + 1
+    # JSON repair
+    fixed = re.sub(r",\s*([}\]])", r"\1", raw)
+    s, e  = fixed.find("{"), fixed.rfind("}") + 1
     if s != -1 and e > s:
-        raw = raw[s:e]
+        for end in range(e, s, -100):
+            try:
+                return json.loads(fixed[s:end])
+            except Exception:
+                pass
 
+    raise ValueError(f"LLM qualitative parse failed: {raw[:300]}")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 6. TICKER SEARCH FALLBACK (jika tidak ada di dokumen)
+# ══════════════════════════════════════════════════════════════════════
+
+def search_ticker_by_name(company_name: str) -> str:
+    """
+    Cari ticker IDX menggunakan nama perusahaan lengkap.
+    Dipakai sebagai fallback jika ticker tidak ditemukan di dokumen.
+    Priority: Yahoo Finance → IDX API → Stooq
+    """
+    import requests
+
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+    }
+    TIMEOUT = 10
+    EXCLUDE = {
+        "PT", "TBK", "IDX", "BEI", "OJK", "IDR", "USD", "IPO",
+        "ROE", "ROA", "DER", "EPS", "CEO", "CFO", "GDP", "EBITDA",
+    }
+
+    def clean(name: str) -> str:
+        name = re.sub(r"\bPT\.?\s*", "", name, flags=re.I)
+        name = re.sub(r"\bTbk\.?\b", "", name, flags=re.I)
+        return re.sub(r"\s+", " ", name).strip()
+
+    cleaned = clean(company_name)
+    if not cleaned:
+        return ""
+
+    # 1. Yahoo Finance Search
     try:
-        return json.loads(raw)
-    except:
-        fixed = re.sub(r',\s*([}\]])', r'\1', raw)
-        try:
-            return json.loads(fixed)
-        except:
-            for i in range(len(fixed), 0, -100):
-                try:
-                    return json.loads(fixed[:i])
-                except:
-                    continue
-            raise ValueError(f"Tidak bisa parse JSON: {raw[:300]}")
+        resp = requests.get(
+            "https://query2.finance.yahoo.com/v1/finance/search",
+            params={"q": cleaned, "lang": "id", "region": "ID",
+                    "quotesCount": 10, "newsCount": 0},
+            headers=HEADERS, timeout=TIMEOUT,
+        )
+        for q in resp.json().get("quotes", []):
+            sym  = q.get("symbol", "")
+            exch = q.get("exchange", "")
+            if sym.endswith(".JK") or exch in ["JKT", "IDX", "Jakarta"]:
+                t = sym.replace(".JK", "").upper()
+                if t not in EXCLUDE and 2 <= len(t) <= 6:
+                    logger.info(f"Ticker Yahoo: {t} untuk '{company_name}'")
+                    return t
+    except Exception as e:
+        logger.warning(f"Yahoo ticker search: {e}")
 
-# ══════════════════════════════════════════════════════════════════
-# MAIN ENTRY POINT
-# ══════════════════════════════════════════════════════════════════
+    # 2. IDX Official API
+    try:
+        resp = requests.get(
+            "https://idx.co.id/umum/GetStockList/",
+            params={"language": "id", "querySearch": cleaned},
+            headers=HEADERS, timeout=TIMEOUT,
+        )
+        data    = resp.json()
+        results = data if isinstance(data, list) else data.get("data", [])
+        if results:
+            t = (results[0].get("stockCode") or results[0].get("StockCode") or "").upper()
+            if t and re.match(r"^[A-Z]{2,6}$", t) and t not in EXCLUDE:
+                logger.info(f"Ticker IDX: {t} untuk '{company_name}'")
+                return t
+    except Exception as e:
+        logger.warning(f"IDX ticker search: {e}")
+
+    # 3. Stooq
+    try:
+        q    = cleaned.lower().replace(" ", "+")
+        resp = requests.get(f"https://stooq.com/q/?s={q}.jk",
+                            headers=HEADERS, timeout=TIMEOUT)
+        m = re.search(r'Symbol["\s:]+([A-Z]{2,6})\.JK', resp.text)
+        if m and m.group(1) not in EXCLUDE:
+            logger.info(f"Ticker Stooq: {m.group(1)}")
+            return m.group(1)
+    except Exception as e:
+        logger.warning(f"Stooq ticker search: {e}")
+
+    return ""
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 7. MAIN ENTRY POINT
+# ══════════════════════════════════════════════════════════════════════
 
 def analyze_prospectus(text: str, lang: str = "ID") -> dict:
-    fx_rate          = detect_fx_rate(text)
-    fin_raw          = extract_financials_with_fallback(text)  # LLM + regex fallback
-    financial, kpi   = normalize_and_compute(fin_raw, fx_rate)
-    result           = llm_qualitative(text, kpi, financial, lang=lang)
+    """
+    Analisis penuh prospektus IPO.
+
+    Args:
+        text : teks prospektus (sudah diekstrak dari PDF)
+        lang : "ID" → output Bahasa Indonesia | "EN" → output English
+
+    Returns:
+        dict lengkap berisi semua hasil analisis
+    """
+    lang = (lang or "ID").upper()
+
+    # Step 1: Deteksi metadata dokumen
+    fx_rate  = detect_fx_rate(text)
+    currency = detect_currency(text)
+    unit     = detect_unit(text)
+
+    # Step 2: Ekstrak data keuangan via LLM multi-chunk
+    fin_raw = llm_extract_financials(text)
+    if not fin_raw.get("satuan"):
+        fin_raw["satuan"] = unit
+    if not fin_raw.get("mata_uang"):
+        fin_raw["mata_uang"] = currency
+
+    # Step 3: Normalisasi + hitung KPI di Python
+    financial, kpi = normalize_and_compute(fin_raw, fx_rate)
+
+    # Step 4: Analisis kualitatif via LLM
+    result = llm_qualitative(text, kpi, financial, lang=lang)
+
+    # Attach data
     result["financial"] = financial
     result["kpi"]       = kpi
+
+    # Step 5: Validasi & cari ticker
+    ticker = str(result.get("ticker") or "").strip().upper()
+    if not ticker or not re.match(r"^[A-Z]{2,6}$", ticker):
+        company_name = result.get("company_name", "")
+        if company_name:
+            logger.info(f"Ticker tidak ada di dokumen, search by name: {company_name}")
+            ticker = search_ticker_by_name(company_name)
+        result["ticker"] = ticker
+    else:
+        result["ticker"] = ticker
+
+    # Step 6: Validasi use_of_funds
+    uof = result.get("use_of_funds", [])
+    if uof:
+        total_alloc = sum(float(x.get("allocation") or 0) for x in uof)
+        # Jika total sangat jauh dari 100, kemungkinan LLM mengarang — set ke 0
+        if total_alloc > 150 or (total_alloc > 0 and total_alloc < 50):
+            logger.warning(f"use_of_funds total={total_alloc}, mungkin tidak akurat")
+
     return result
