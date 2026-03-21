@@ -251,13 +251,18 @@ def llm_extract_financials(text: str) -> Dict[str, Any]:
 
     system_msg = _FIN_SYSTEM + "\n" + json.dumps(_FIN_SCHEMA, ensure_ascii=False, indent=2)
 
-    def _has_data(r: dict) -> bool:
-        """Cek apakah hasil ekstraksi punya data bermakna."""
+    def _has_fin_data(r: dict) -> bool:
+        """Cek apakah hasil ekstraksi punya data laporan keuangan bermakna."""
         for yr in r.get("data_per_tahun", []):
             for k in ("pendapatan", "laba_kotor", "laba_usaha", "laba_bersih"):
                 if yr.get(k) is not None:
                     return True
         return False
+
+    def _has_kpi_data(r: dict) -> bool:
+        """Cek apakah ada nilai untuk hitung KPI (saham + harga + ekuitas)."""
+        return (r.get("total_saham_beredar") is not None and
+                r.get("harga_penawaran") is not None)
 
     def _call_llm(chunk: str) -> dict:
         try:
@@ -272,58 +277,22 @@ def llm_extract_financials(text: str) -> Dict[str, Any]:
             )
             raw = resp.choices[0].message.content
             result = _safe_json(raw)
-            return result if result else empty_result
+            return result if result else empty_result.copy()
         except Exception as e:
             logger.warning(f"LLM financial extraction error: {e}")
-            return empty_result
+            return empty_result.copy()
 
-    # FASE 1: Single-pass dengan 400k karakter pertama
-    result = _call_llm(text[:400000])
-    if _has_data(result):
-        logger.info("Financial data ditemukan di fase 1 (single-pass)")
-        return result
-
-    logger.info("Fase 1 kosong — coba chunk scan untuk data keuangan")
-
-    # FASE 2: Scan semua chunk, merge hasilnya
-    all_chunks = _chunk_text(text, max_len=60000)
-
-    # Prioritaskan chunk yang mengandung keyword keuangan
-    priority_chunks = []
-    for c in all_chunks:
-        cl = c.lower()
-        if "daftar isi" in cl and cl.count("halaman") > 5:
-            continue
-        if any(k in cl for k in _FIN_KEYWORDS):
-            priority_chunks.append(c)
-
-    # Tambahkan chunk tengah dokumen (sering berisi tabel keuangan)
-    if all_chunks:
-        mid = len(all_chunks) // 2
-        for c in all_chunks[max(0, mid - 1): mid + 2]:
-            if c not in priority_chunks:
-                priority_chunks.append(c)
-
-    merged = dict(empty_result)
-    for chunk in priority_chunks[:6]:  # Maksimal 6 chunk
-        part = _call_llm(chunk)
-        if not part:
-            continue
-
-        # Merge metadata
+    def _merge(base: dict, part: dict) -> dict:
+        """Merge hasil ekstraksi baru ke dalam base."""
         for k in ("satuan", "mata_uang"):
-            if not merged[k] and part.get(k):
-                merged[k] = part[k]
-
-        # Merge tahun
+            if not base[k] and part.get(k):
+                base[k] = part[k]
         if part.get("tahun_tersedia"):
-            merged["tahun_tersedia"] = sorted(
-                set(merged["tahun_tersedia"]) | set(str(y) for y in part["tahun_tersedia"])
+            base["tahun_tersedia"] = sorted(
+                set(base["tahun_tersedia"]) | set(str(y) for y in part["tahun_tersedia"])
             )
-
-        # Merge data per tahun
         if part.get("data_per_tahun"):
-            m_dict = {str(d.get("tahun", "")).strip(): d for d in merged["data_per_tahun"]}
+            m_dict = {str(d.get("tahun", "")).strip(): d for d in base["data_per_tahun"]}
             for d in part["data_per_tahun"]:
                 y = str(d.get("tahun", "")).strip()
                 if not y:
@@ -335,19 +304,58 @@ def llm_extract_financials(text: str) -> Dict[str, Any]:
                             m_dict[y][k] = v
                 else:
                     m_dict[y] = d
-            merged["data_per_tahun"] = [m_dict[k] for k in sorted(m_dict.keys())]
-
-        # Merge scalar
+            base["data_per_tahun"] = [m_dict[k] for k in sorted(m_dict.keys())]
         for k in ("total_ekuitas", "total_liabilitas", "total_aset",
                   "total_saham_beredar", "harga_penawaran"):
             v = part.get(k)
-            if merged.get(k) is None and v is not None and str(v).strip() not in ("null", ""):
-                merged[k] = v
+            if base.get(k) is None and v is not None and str(v).strip() not in ("null", ""):
+                base[k] = v
+        return base
 
-        if _has_data(merged):
-            logger.info(f"Financial data ditemukan di fase 2 (chunk scan)")
+    merged = empty_result.copy()
+
+    # ── FASE 1: Halaman depan prospektus (5000 chars) ──
+    # Harga penawaran & total saham hampir selalu ada di halaman 1-3
+    front = _call_llm(text[:5000])
+    merged = _merge(merged, front)
+    logger.info(f"Fase 1 (front): saham={merged.get('total_saham_beredar')}, harga={merged.get('harga_penawaran')}")
+
+    # ── FASE 2: Chunk scan untuk tabel keuangan ──
+    all_chunks = _chunk_text(text, max_len=60000)
+
+    # Prioritaskan chunk yang mengandung keyword keuangan
+    priority_chunks = []
+    for c in all_chunks:
+        cl = c.lower()
+        if "daftar isi" in cl and cl.count("halaman") > 5:
+            continue
+        if any(k in cl for k in _FIN_KEYWORDS):
+            priority_chunks.append(c)
+
+    # Tambahkan chunk awal, tengah, akhir dokumen
+    for idx in [0, len(all_chunks)//4, len(all_chunks)//2, -1]:
+        try:
+            c = all_chunks[idx]
+            if c not in priority_chunks:
+                priority_chunks.append(c)
+        except IndexError:
+            pass
+
+    for chunk in priority_chunks[:8]:
+        part = _call_llm(chunk)
+        if not part:
+            continue
+
+        merged = _merge(merged, part)
+
+        if _has_fin_data(merged):
+            logger.info("Financial data ditemukan di fase 2 (chunk scan)")
             break
 
+    logger.info(f"Final extraction: years={merged.get('tahun_tersedia')}, "
+                f"saham={merged.get('total_saham_beredar')}, "
+                f"harga={merged.get('harga_penawaran')}, "
+                f"ekuitas={merged.get('total_ekuitas')}")
     return merged
 
 
@@ -683,16 +691,27 @@ def analyze_prospectus(text: str, lang: str = "ID") -> dict:
     fx_rate  = detect_fx_rate(text)
     currency = detect_currency(text)
     unit     = detect_unit(text)
+    logger.info(f"Metadata: currency={currency}, unit={unit}, fx_rate={fx_rate}")
 
-    # Step 2: Ekstrak data keuangan (fase 1: single-pass, fase 2: chunk scan)
+    # Step 2: Ekstrak data keuangan (fase 1: halaman depan, fase 2: chunk scan)
     fin_raw = llm_extract_financials(text)
     if not fin_raw.get("satuan"):
         fin_raw["satuan"] = unit
     if not fin_raw.get("mata_uang"):
         fin_raw["mata_uang"] = currency
 
+    # DEBUG — log raw extraction result agar mudah troubleshoot
+    logger.info(f"[FIN_RAW] satuan={fin_raw.get('satuan')}, mata_uang={fin_raw.get('mata_uang')}")
+    logger.info(f"[FIN_RAW] tahun={fin_raw.get('tahun_tersedia')}")
+    logger.info(f"[FIN_RAW] saham={fin_raw.get('total_saham_beredar')}, harga={fin_raw.get('harga_penawaran')}")
+    logger.info(f"[FIN_RAW] ekuitas={fin_raw.get('total_ekuitas')}, liabilitas={fin_raw.get('total_liabilitas')}")
+    for yr in fin_raw.get("data_per_tahun", []):
+        logger.info(f"[FIN_RAW] {yr.get('tahun')}: rev={yr.get('pendapatan')}, gp={yr.get('laba_kotor')}, "
+                    f"op={yr.get('laba_usaha')}, net={yr.get('laba_bersih')}")
+
     # Step 3: Normalisasi + hitung semua KPI di Python
     financial, kpi = normalize_and_compute(fin_raw, fx_rate)
+    logger.info(f"[KPI] {kpi}")
 
     # Step 4: Analisis kualitatif dengan bahasa sesuai lang
     result = llm_qualitative(text, kpi, financial, lang=lang)
