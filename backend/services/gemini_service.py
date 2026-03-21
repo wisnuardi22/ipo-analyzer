@@ -348,7 +348,7 @@ OUTPUT JSON:
         priority_chunks.insert(0, chunks[0])
     if len(chunks) > 1 and chunks[-1] not in priority_chunks:
         priority_chunks.append(chunks[-1])
-    selected_chunks = priority_chunks[:5]
+    selected_chunks = priority_chunks[:8]
 
     def safe_json(s: str) -> Optional[dict]:
         s = s.strip()

@@ -34,14 +34,16 @@ def get_ticker_from_google(company_name: str, ticker_hint: str = "") -> str:
     """
     Cari ticker IDX via multi-source.
     Priority: ticker_hint (dari Gemini) → Yahoo search → IDX search → Stooq
+
+    PENTING: Untuk IPO baru yang belum listing, ticker dari Gemini
+    langsung dipakai tanpa verifikasi Yahoo karena saham belum ada di bursa.
     """
-    # Step 1: Gunakan ticker dari Gemini jika ada
+    # Step 1: Gunakan ticker dari Gemini jika format valid — LANGSUNG PAKAI
+    # Tidak perlu verifikasi Yahoo karena IPO baru belum tentu listed
     if ticker_hint and re.match(r"^[A-Z]{2,6}$", ticker_hint.strip().upper()):
         t = ticker_hint.strip().upper()
-        if _verify_yahoo(t):
-            logger.info(f"✅ Ticker Gemini terverifikasi: {t}")
-            return t
-        logger.warning(f"⚠️ Ticker Gemini {t} tidak valid di Yahoo, coba search")
+        logger.info(f"✅ Ticker dari Gemini: {t}")
+        return t
 
     # Step 2: Yahoo Finance Search
     t = _yahoo_search(company_name)
@@ -58,17 +60,12 @@ def get_ticker_from_google(company_name: str, ticker_hint: str = "") -> str:
     if t:
         return t
 
-    # Step 5: Fallback ke ticker_hint meski tidak terverifikasi
-    if ticker_hint:
-        logger.warning(f"⚠️ Fallback ke ticker hint: {ticker_hint}")
-        return ticker_hint.strip().upper()
-
     logger.error(f"❌ Ticker tidak ditemukan untuk: {company_name}")
     return ""
 
 
 def _verify_yahoo(ticker: str) -> bool:
-    """Verifikasi ticker di Yahoo Finance."""
+    """Verifikasi ticker di Yahoo Finance (hanya untuk saham yang sudah listing)."""
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}.JK"
         resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
@@ -139,7 +136,6 @@ def _stooq_search(company_name: str) -> str:
         clean = _clean_name(company_name).lower().replace(" ", "+")
         url   = f"https://stooq.com/q/?s={clean}.jk"
         resp  = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
-        # Cari ticker di response
         if resp.status_code == 200:
             match = re.search(r'Symbol["\s:]+([A-Z]{2,6})\.JK', resp.text)
             if match:
@@ -167,6 +163,7 @@ def get_market_data(ticker: str) -> dict:
     """
     Ambil data pasar terkini via multi-source.
     Priority: Yahoo Finance chart API → Yahoo Finance quoteSummary → IDX
+    Jika saham belum listing, semua source akan return kosong — itu normal.
     """
     if not ticker:
         return {}
@@ -177,7 +174,6 @@ def get_market_data(ticker: str) -> dict:
     # Coba Yahoo Finance
     result = _yahoo_chart(ticker_yf)
     if result.get("current_price"):
-        # Tambahkan data detail
         detail = _yahoo_summary(ticker_yf)
         result.update(detail)
         return result
@@ -192,6 +188,8 @@ def get_market_data(ticker: str) -> dict:
     if stooq_data:
         return stooq_data
 
+    # Saham belum listing — return kosong, ticker tetap disimpan
+    logger.info(f"ℹ️ Harga tidak tersedia untuk {ticker} (mungkin belum listing)")
     return {}
 
 
@@ -280,7 +278,7 @@ def _stooq_price(ticker: str) -> dict:
             if len(lines) > 1:
                 parts = lines[1].split(",")
                 if len(parts) > 4:
-                    price = parts[4]  # Close price
+                    price = parts[4]
                     if price and price != "N/D":
                         return {"current_price": _fmt_price(float(price), "IDR")}
     except Exception as e:
