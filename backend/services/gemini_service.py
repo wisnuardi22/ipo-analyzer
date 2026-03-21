@@ -1,15 +1,14 @@
 """
 services/gemini_service.py
 --------------------------
-Analisis prospektus IPO Indonesia secara komprehensif.
+Analisis prospektus IPO Indonesia — versi final.
+
 Pipeline:
   1. Detect metadata dokumen (currency, unit, fx rate)
-  2. LLM multi-chunk — ekstrak data keuangan mentah
+  2. LLM single-pass — ekstrak data keuangan (response_format JSON)
   3. Python — normalisasi + hitung semua KPI
-  4. LLM — analisis kualitatif (summary, risiko, benefit, use of funds)
-  5. Fallback ticker search jika tidak ada di dokumen
-
-Output mendukung lang="ID" (Bahasa Indonesia) dan lang="EN" (English).
+  4. LLM — analisis kualitatif lengkap (EN/ID) dengan response_format JSON
+  5. Ticker search fallback via Yahoo / IDX / Stooq
 """
 
 from __future__ import annotations
@@ -19,6 +18,7 @@ import logging
 import math
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
@@ -33,7 +33,6 @@ client = OpenAI(
     base_url="https://ai.sumopod.com/v1",
 )
 MODEL = "gemini/gemini-2.5-flash"
-
 
 # ══════════════════════════════════════════════════════════════════════
 # 1. NUMBER UTILITIES
@@ -143,13 +142,62 @@ def detect_fx_rate(text: str) -> Optional[float]:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 3. LLM FINANCIAL EXTRACTION (MULTI-CHUNK)
+# 3. LLM FINANCIAL EXTRACTION — SINGLE PASS + JSON MODE
 # ══════════════════════════════════════════════════════════════════════
 
-def _chunk_text(text: str, max_len: int = 18000, overlap: int = 800) -> List[str]:
+_FIN_SYSTEM = """Kamu adalah akuntan senior Indonesia. Tugasmu: ekstrak data keuangan dari teks prospektus IPO.
+
+CARI bagian-bagian ini di dokumen:
+1. "IKHTISAR DATA KEUANGAN PENTING" atau "DATA KEUANGAN PENTING"
+2. "LAPORAN LABA RUGI DAN PENGHASILAN KOMPREHENSIF"
+3. "LAPORAN POSISI KEUANGAN" atau "NERACA KONSOLIDASIAN"
+4. "SELECTED FINANCIAL DATA" atau "FINANCIAL HIGHLIGHTS"
+5. Halaman ringkasan di awal prospektus (biasanya ada tabel ikhtisar)
+
+ATURAN EKSTRAKSI:
+- Baca header kolom tabel untuk mengetahui tahun yang tersedia
+- Tulis angka PERSIS seperti di dokumen (jangan ubah satuan)
+- Angka negatif dalam kurung (1.234) → tulis sebagai -1234
+- total_ekuitas, total_liabilitas, total_aset: ambil dari tahun TERAKHIR
+- total_saham_beredar: jumlah saham SETELAH IPO (biasanya di halaman depan)
+- harga_penawaran: harga per saham tanpa "Rp" (di halaman ringkasan penawaran)
+- Jika ada keterangan "dalam jutaan Rupiah" → satuan = "jutaan"
+- Jika tidak ada keterangan satuan → satuan = "full"
+
+KEMBALIKAN JSON DENGAN STRUKTUR PERSIS INI (isi dengan data nyata atau null):"""
+
+_FIN_SCHEMA = {
+    "satuan": "jutaan",
+    "mata_uang": "IDR",
+    "tahun_tersedia": ["2022", "2023", "2024"],
+    "data_per_tahun": [
+        {"tahun": "2022", "pendapatan": None, "laba_kotor": None,
+         "laba_usaha": None, "laba_bersih": None, "depresiasi": None},
+    ],
+    "total_ekuitas": None,
+    "total_liabilitas": None,
+    "total_aset": None,
+    "total_saham_beredar": None,
+    "harga_penawaran": None,
+}
+
+# Keywords untuk memilih chunk yang relevan secara keuangan
+_FIN_KEYWORDS = [
+    "ikhtisar data keuangan", "data keuangan penting", "laporan laba rugi",
+    "posisi keuangan", "neraca konsolidasian", "laba kotor", "laba usaha",
+    "laba bersih", "pendapatan usaha", "pendapatan bersih", "penjualan bersih",
+    "gross profit", "net revenue", "operating profit", "net income",
+    "profit or loss", "statement of profit", "balance sheet",
+    "selected financial", "financial highlights", "financial summary",
+]
+
+
+def _chunk_text(text: str, max_len: int = 120000) -> List[str]:
+    """Bagi teks menjadi chunk besar — untuk prospektus panjang."""
     if len(text) <= max_len:
         return [text]
     chunks, i = [], 0
+    overlap = 2000
     while i < len(text):
         chunks.append(text[i: i + max_len])
         i += max_len - overlap
@@ -176,120 +224,78 @@ def _safe_json(raw: str) -> Optional[dict]:
     return None
 
 
-_FIN_KEYWORDS = [
-    "laporan laba rugi", "ikhtisar data keuangan", "data keuangan penting",
-    "ringkasan keuangan", "informasi keuangan", "laba kotor", "laba usaha",
-    "laba bersih", "pendapatan usaha", "pendapatan bersih", "penjualan bersih",
-    "posisi keuangan", "neraca", "ekuitas", "liabilitas",
-    "gross profit", "net revenue", "operating profit", "net income",
-    "profit or loss", "statement of profit", "balance sheet",
-    "selected financial", "financial highlights",
-]
-
-_FIN_SYSTEM = """Kamu adalah akuntan senior Indonesia. Ekstrak data keuangan dari potongan prospektus IPO.
-Output HANYA JSON murni — tanpa teks lain, tanpa markdown.
-
-INSTRUKSI EKSTRAKSI:
-1. Cari tabel laporan keuangan dengan judul seperti:
-   "LAPORAN LABA RUGI", "DATA KEUANGAN PENTING", "IKHTISAR DATA KEUANGAN",
-   "SELECTED FINANCIAL DATA", "CONSOLIDATED STATEMENTS OF PROFIT OR LOSS",
-   "RINGKASAN KEUANGAN", "INFORMASI KEUANGAN RINGKAS"
-
-2. Baca header kolom tabel — itulah tahun-tahun tersedia (contoh: 2021, 2022, 2023, 2024).
-   Masukkan SEMUA tahun ke "tahun_tersedia" dan buat entry per tahun di "data_per_tahun".
-
-3. Untuk setiap tahun, ekstrak:
-   - pendapatan   : Total Pendapatan / Revenue / Penjualan Bersih / Net Revenue
-   - laba_kotor   : Laba Kotor / Gross Profit
-   - laba_usaha   : Laba / Rugi Usaha / Operating Profit/Loss (bisa negatif)
-   - laba_bersih  : Laba / Rugi Bersih / Net Profit/Loss (bisa negatif)
-   - depresiasi   : Depresiasi & Amortisasi (null jika tidak ada)
-
-4. Catat satuan dari header tabel:
-   "dalam jutaan Rupiah" → satuan="jutaan"
-   "dalam ribuan" → satuan="ribuan"
-   "dalam miliar" → satuan="miliar"
-   Tidak ada keterangan → satuan="full"
-
-5. Tulis angka PERSIS seperti di dokumen — JANGAN konversi satuan.
-   Angka negatif dalam kurung (1.234) → tulis -1234.
-
-6. Dari neraca/posisi keuangan, ambil tahun TERAKHIR:
-   - total_ekuitas, total_liabilitas, total_aset
-
-7. Cari:
-   - total_saham_beredar: jumlah saham beredar SETELAH IPO
-   - harga_penawaran: harga per saham (angka saja, tanpa "Rp")
-
-8. Jika potongan ini tidak ada data keuangan → isi null/[]
-
-OUTPUT JSON WAJIB PERSIS FORMAT INI:
-{
-  "satuan": "jutaan",
-  "mata_uang": "IDR",
-  "tahun_tersedia": ["2022","2023","2024"],
-  "data_per_tahun": [
-    {"tahun":"2022","pendapatan":null,"laba_kotor":null,"laba_usaha":null,"laba_bersih":null,"depresiasi":null},
-    {"tahun":"2023","pendapatan":null,"laba_kotor":null,"laba_usaha":null,"laba_bersih":null,"depresiasi":null},
-    {"tahun":"2024","pendapatan":null,"laba_kotor":null,"laba_usaha":null,"laba_bersih":null,"depresiasi":null}
-  ],
-  "total_ekuitas": null,
-  "total_liabilitas": null,
-  "total_aset": null,
-  "total_saham_beredar": null,
-  "harga_penawaran": null
-}"""
-
-
 def llm_extract_financials(text: str) -> Dict[str, Any]:
-    """Multi-chunk LLM extraction untuk data keuangan."""
-    merged: Dict[str, Any] = {
-        "satuan": None, "mata_uang": None,
-        "tahun_tersedia": [], "data_per_tahun": [],
+    """
+    Ekstrak data keuangan dengan pendekatan dua fase:
+    1. Single-pass dengan teks penuh (ideal untuk prospektus pendek/sedang)
+    2. Jika hasilnya kosong, scan chunk-chunk yang mengandung keyword keuangan
+    """
+    empty_result = {
+        "satuan": None, "mata_uang": None, "tahun_tersedia": [], "data_per_tahun": [],
         "total_ekuitas": None, "total_liabilitas": None, "total_aset": None,
         "total_saham_beredar": None, "harga_penawaran": None,
     }
 
-    all_chunks = _chunk_text(text, max_len=18000, overlap=800)
+    system_msg = _FIN_SYSTEM + "\n" + json.dumps(_FIN_SCHEMA, ensure_ascii=False, indent=2)
 
-    # Pilih chunk prioritas berdasarkan keywords keuangan
-    priority, others = [], []
+    def _has_data(r: dict) -> bool:
+        """Cek apakah hasil ekstraksi punya data bermakna."""
+        for yr in r.get("data_per_tahun", []):
+            for k in ("pendapatan", "laba_kotor", "laba_usaha", "laba_bersih"):
+                if yr.get(k) is not None:
+                    return True
+        return False
+
+    def _call_llm(chunk: str) -> dict:
+        try:
+            resp = client.chat.completions.create(
+                model=MODEL,
+                temperature=0.0,
+                max_tokens=4000,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": f"DOKUMEN PROSPEKTUS:\n\n{chunk}"},
+                ],
+            )
+            raw = resp.choices[0].message.content
+            result = _safe_json(raw)
+            return result if result else empty_result
+        except Exception as e:
+            logger.warning(f"LLM financial extraction error: {e}")
+            return empty_result
+
+    # FASE 1: Single-pass dengan 400k karakter pertama
+    result = _call_llm(text[:400000])
+    if _has_data(result):
+        logger.info("Financial data ditemukan di fase 1 (single-pass)")
+        return result
+
+    logger.info("Fase 1 kosong — coba chunk scan untuk data keuangan")
+
+    # FASE 2: Scan semua chunk, merge hasilnya
+    all_chunks = _chunk_text(text, max_len=60000)
+
+    # Prioritaskan chunk yang mengandung keyword keuangan
+    priority_chunks = []
     for c in all_chunks:
         cl = c.lower()
         if "daftar isi" in cl and cl.count("halaman") > 5:
             continue
         if any(k in cl for k in _FIN_KEYWORDS):
-            priority.append(c)
-        else:
-            others.append(c)
+            priority_chunks.append(c)
 
-    # Sertakan chunk tengah dokumen (sering berisi tabel keuangan)
-    mid = len(others) // 2
-    selected = list(priority[:8])
-    for c in others[max(0, mid - 1): mid + 2]:
-        if c not in selected:
-            selected.append(c)
-    # Selalu sertakan chunk pertama & terakhir
-    if all_chunks and all_chunks[0] not in selected:
-        selected.insert(0, all_chunks[0])
-    if len(all_chunks) > 1 and all_chunks[-1] not in selected:
-        selected.append(all_chunks[-1])
+    # Tambahkan chunk tengah dokumen (sering berisi tabel keuangan)
+    if all_chunks:
+        mid = len(all_chunks) // 2
+        for c in all_chunks[max(0, mid - 1): mid + 2]:
+            if c not in priority_chunks:
+                priority_chunks.append(c)
 
-    selected = selected[:10]
-
-    for chunk in selected:
-        try:
-            resp = client.chat.completions.create(
-                model=MODEL, temperature=0.01, max_tokens=4000,
-                messages=[
-                    {"role": "system", "content": _FIN_SYSTEM},
-                    {"role": "user", "content": f"DOKUMEN:\n{chunk}"},
-                ],
-            )
-            part = _safe_json(resp.choices[0].message.content) or {}
-        except Exception as e:
-            logger.warning(f"LLM financial chunk error: {e}")
-            part = {}
+    merged = dict(empty_result)
+    for chunk in priority_chunks[:6]:  # Maksimal 6 chunk
+        part = _call_llm(chunk)
+        if not part:
+            continue
 
         # Merge metadata
         for k in ("satuan", "mata_uang"):
@@ -318,12 +324,16 @@ def llm_extract_financials(text: str) -> Dict[str, Any]:
                     m_dict[y] = d
             merged["data_per_tahun"] = [m_dict[k] for k in sorted(m_dict.keys())]
 
-        # Merge scalar fields
+        # Merge scalar
         for k in ("total_ekuitas", "total_liabilitas", "total_aset",
                   "total_saham_beredar", "harga_penawaran"):
             v = part.get(k)
             if merged.get(k) is None and v is not None and str(v).strip() not in ("null", ""):
                 merged[k] = v
+
+        if _has_data(merged):
+            logger.info(f"Financial data ditemukan di fase 2 (chunk scan)")
+            break
 
     return merged
 
@@ -350,7 +360,6 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
     harga      = parse_num(fin_raw.get("harga_penawaran"))
     harga_idr  = harga * fx_rate if (harga and currency == "USD" and fx_rate) else harga
 
-    # Chart series
     revenue_growth, gross_margin, op_margin, ebitda_margin, net_margin = [], [], [], [], []
     prev_rev = None
     for yr in years_data:
@@ -372,7 +381,6 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
         })
         net_margin.append({"year": y, "value": to_pct(safe_div(net, rev))})
 
-    # KPI
     kpi = {"pe": "N/A", "pb": "N/A", "roe": "N/A", "der": "N/A", "eps": "N/A", "market_cap": "N/A"}
     laba_last = years_data[-1].get("laba_bersih") if years_data else None
 
@@ -428,7 +436,7 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 5. LLM QUALITATIVE ANALYSIS
+# 5. LLM QUALITATIVE ANALYSIS — DENGAN BAHASA EN/ID YANG BENAR
 # ══════════════════════════════════════════════════════════════════════
 
 def llm_qualitative(text: str, kpi: Dict, financial: Dict, lang: str = "ID") -> Dict:
@@ -436,142 +444,127 @@ def llm_qualitative(text: str, kpi: Dict, financial: Dict, lang: str = "ID") -> 
     currency = financial.get("currency", "IDR")
     years    = financial.get("years", [])
 
-    lang_rule = (
-        "OUTPUT LANGUAGE: Write ALL text fields in ENGLISH. "
-        "company_name stays as original from document."
-    ) if is_en else (
-        "BAHASA OUTPUT: Tulis SEMUA field teks dalam Bahasa Indonesia. "
-        "company_name tetap asli dari dokumen."
-    )
+    # ── Instruksi bahasa yang eksplisit dan ketat ──
+    if is_en:
+        lang_instruction = """CRITICAL LANGUAGE RULE: You MUST write ALL output fields in ENGLISH ONLY.
+This includes: summary, sector, use_of_funds descriptions, underwriter reputation,
+overall_risk_reason, all risk titles and descriptions, all benefit titles and descriptions.
+DO NOT use any Bahasa Indonesia words in the output. ENGLISH ONLY."""
+    else:
+        lang_instruction = """ATURAN BAHASA WAJIB: Kamu HARUS menulis SEMUA field output dalam BAHASA INDONESIA.
+Ini termasuk: summary, sector, deskripsi use_of_funds, reputasi underwriter,
+overall_risk_reason, semua judul dan deskripsi risiko, semua judul dan deskripsi benefit.
+JANGAN gunakan kata-kata Bahasa Inggris kecuali istilah teknis keuangan umum (IPO, ROE, dll).
+BAHASA INDONESIA SAJA."""
 
-    prompt = f"""Kamu adalah analis IPO senior Indonesia. Analisis prospektus IPO berikut secara mendalam dan akurat.
+    system_prompt = f"""Kamu adalah analis IPO senior Indonesia yang berpengalaman 20 tahun.
+Tugasmu: analisis mendalam prospektus IPO dan hasilkan laporan lengkap.
 
-{lang_rule}
-Gunakan mata uang {currency} untuk semua nilai uang.
+{lang_instruction}
 
-DATA KPI SUDAH DIHITUNG SISTEM — SALIN PERSIS, JANGAN HITUNG ULANG:
+Gunakan mata uang {currency} untuk semua nilai moneter.
+
+DATA KPI SUDAH DIHITUNG SISTEM — SALIN PERSIS NILAI INI, JANGAN HITUNG ULANG:
 {json.dumps(kpi, ensure_ascii=False)}
-Tahun data keuangan tersedia: {years}
+Tahun data tersedia: {years}
 
-════ INSTRUKSI ANALISIS ════
-
-A. IDENTITAS PERUSAHAAN
-   company_name : nama lengkap perusahaan termasuk "Tbk"
-   ticker       : kode saham IDX. Cari di dokumen dengan pola PERSIS:
-                  "Kode Saham:", "Kode Efek:", "Stock Code:", "kode saham adalah",
-                  "akan dicatatkan dengan kode", "kode perdagangan"
-                  → Jika ada di dokumen, WAJIB diisi. Jika tidak ada → kosongkan ""
-   sector       : sektor bisnis spesifik (misal: "Pertambangan Emas", "Perbankan", "Teknologi")
-   ipo_date     : tanggal PENCATATAN di BEI (bukan tanggal penawaran)
-   share_price  : harga penawaran final
-   total_shares : total saham beredar setelah IPO
-   market_cap   : SALIN PERSIS dari DATA KPI di atas
-
-B. RINGKASAN (summary) — 3 paragraf spesifik {'in English' if is_en else 'Bahasa Indonesia'}:
-   Paragraf 1: Profil perusahaan, bisnis utama, skala operasi, lokasi, jumlah karyawan/aset
-   Paragraf 2: Detail IPO — jumlah saham ditawarkan, persentase dari modal, harga, total dana IPO
-   Paragraf 3: Kondisi keuangan terkini, pertumbuhan revenue, profitabilitas, prospek ke depan
-   Pisahkan paragraf dengan \\n\\n
-
-C. PENGGUNAAN DANA (use_of_funds)
-   Cari bagian: "Rencana Penggunaan Dana" / "Penggunaan Dana Hasil Penawaran Umum" / "Use of Proceeds"
-   - Ekstrak SEMUA item alokasi (2-6 item sesuai dokumen)
-   - allocation: angka persentase PERSIS dari dokumen. Total HARUS = 100.
-   - DILARANG mengarang persentase. Jika tidak ada % eksplisit, hitung dari nominal.
-   - DILARANG membuat allocation semua 0 jika ada data di dokumen
-   - description: spesifik dengan nama proyek, lokasi, nilai nominal
-
-D. PENJAMIN EMISI (underwriter)
-   lead       : nama penjamin pelaksana emisi efek utama
-   others     : array nama penjamin lain (bisa kosong [])
-   type       : "Full Commitment" atau "Best Efforts"
-   reputation : analisis singkat track record penjamin 2-3 kalimat {'in English' if is_en else 'Bahasa Indonesia'}
-
-E. ANALISIS RISIKO
-   overall_risk_level  : "High", "Medium", atau "Low" berdasarkan kondisi nyata perusahaan
-   overall_risk_reason : 2-3 kalimat alasan utama
-   risks               : 4-5 risiko SPESIFIK dari bab Faktor Risiko di dokumen
-     - level: "High", "Medium", atau "Low"
-     - title: judul singkat risiko
-     - desc: penjelasan 1-2 kalimat dengan angka/fakta konkret
-
-F. KEUNGGULAN INVESTASI (benefits)
-   4-6 keunggulan kompetitif SPESIFIK dari dokumen, dengan data/angka konkret
-   - title: judul singkat
-   - desc: penjelasan 1-2 kalimat dengan fakta konkret
-
-ATURAN PENTING:
-- Output HANYA JSON murni, TANPA markdown, TANPA teks lain
-- Semua string field wajib diisi (gunakan "" jika tidak ada, BUKAN null)
-- risks[].level dan overall_risk_level HARUS salah satu dari: "High", "Medium", "Low"
-- use_of_funds[].allocation adalah NUMBER (angka), BUKAN string
-
-DOKUMEN PROSPEKTUS:
-{text[:380000]}
-
-OUTPUT JSON:
+SCHEMA OUTPUT JSON (wajib ikuti struktur ini persis):
 {{
-  "company_name": "PT ... Tbk",
-  "ticker": "",
-  "sector": "...",
-  "ipo_date": "...",
-  "share_price": "...",
-  "total_shares": "...",
-  "market_cap": "...",
-  "summary": "...",
+  "company_name": "Nama lengkap perusahaan Tbk (dari dokumen)",
+  "ticker": "Kode saham IDX 2-6 huruf KAPITAL. CARI di dokumen: Kode Saham, Kode Efek, Stock Code. Jika tidak ada -> string kosong",
+  "sector": "{'Specific business sector in English, e.g. Gold Mining, Banking, Technology' if is_en else 'Sektor bisnis spesifik, misal: Pertambangan Emas, Perbankan, Teknologi'}",
+  "ipo_date": "Tanggal pencatatan BEI dari dokumen",
+  "share_price": "Harga penawaran final dari dokumen",
+  "total_shares": "Total saham beredar setelah IPO dari dokumen",
+  "market_cap": "SALIN PERSIS nilai market_cap dari DATA KPI di atas",
+  "summary": "{'3 PARAGRAPHS IN ENGLISH separated by double newline. P1: Company profile with concrete numbers. P2: IPO details - shares offered, percentage, price, total proceeds. P3: Financial condition, growth, outlook.' if is_en else '3 PARAGRAF BAHASA INDONESIA dipisah double newline. P1: Profil perusahaan dengan angka konkret. P2: Detail IPO - jumlah saham, persentase, harga, total dana. P3: Kondisi keuangan, pertumbuhan, prospek.'}",
   "use_of_funds": [
-    {{"category": "...", "description": "...", "allocation": 60}},
-    {{"category": "...", "description": "...", "allocation": 40}}
+    {{
+      "category": "{'Category name in English' if is_en else 'Nama kategori'}",
+      "description": "{'Specific description with project names and nominal values in ' + currency if is_en else 'Deskripsi spesifik dengan nama proyek dan nilai nominal dalam ' + currency}",
+      "allocation": 60
+    }}
   ],
   "underwriter": {{
-    "lead": "...",
-    "others": [],
-    "type": "Full Commitment",
-    "reputation": "..."
+    "lead": "Nama penjamin pelaksana emisi efek dari dokumen",
+    "others": ["Daftar penjamin lainnya dari dokumen"],
+    "type": "Full Commitment atau Best Efforts",
+    "reputation": "{'2-3 sentences track record analysis in English' if is_en else '2-3 kalimat analisis track record dalam Bahasa Indonesia'}"
   }},
-  "overall_risk_level": "Medium",
-  "overall_risk_reason": "...",
+  "overall_risk_level": "High atau Medium atau Low",
+  "overall_risk_reason": "{'2-3 sentences in English explaining the risk level' if is_en else '2-3 kalimat Bahasa Indonesia menjelaskan level risiko'}",
   "risks": [
-    {{"level": "High", "title": "...", "desc": "..."}},
-    {{"level": "Medium", "title": "...", "desc": "..."}}
+    {{
+      "level": "High atau Medium atau Low",
+      "title": "{'Risk title in English' if is_en else 'Judul risiko Bahasa Indonesia'}",
+      "desc": "{'1-2 sentences specific description in English with concrete facts' if is_en else '1-2 kalimat deskripsi spesifik Bahasa Indonesia dengan fakta konkret'}"
+    }}
   ],
   "benefits": [
-    {{"title": "...", "desc": "..."}},
-    {{"title": "...", "desc": "..."}}
+    {{
+      "title": "{'Benefit title in English' if is_en else 'Judul keunggulan Bahasa Indonesia'}",
+      "desc": "{'1-2 sentences specific description in English with data/numbers' if is_en else '1-2 kalimat deskripsi spesifik Bahasa Indonesia dengan data/angka'}"
+    }}
   ]
-}}"""
+}}
 
-    resp = client.chat.completions.create(
-        model=MODEL, temperature=0.1, max_tokens=12000,
-        messages=[{"role": "user", "content": prompt}],
-    )
+ATURAN PENTING:
+1. use_of_funds: allocation HARUS berupa NUMBER (bukan string). Total allocation = 100.
+   Cari bagian "Rencana Penggunaan Dana" / "Use of Proceeds" di dokumen.
+   WAJIB isi 2-6 item. DILARANG semua allocation = 0.
+   Jika tidak ada persentase eksplisit, estimasi berdasarkan nominal yang disebutkan.
 
-    raw    = resp.choices[0].message.content.strip()
-    result = _safe_json(raw)
-    if result:
-        return result
+2. risks: isi 4-5 item SPESIFIK dari dokumen (bab Faktor Risiko).
+   level HARUS salah satu dari: "High", "Medium", "Low" (huruf kapital pertama saja).
 
-    # JSON repair
-    fixed = re.sub(r",\s*([}\]])", r"\1", raw)
-    s, e  = fixed.find("{"), fixed.rfind("}") + 1
-    if s != -1 and e > s:
-        for end in range(e, s, -100):
-            try:
-                return json.loads(fixed[s:end])
-            except Exception:
-                pass
+3. benefits: isi 4-6 item SPESIFIK keunggulan kompetitif dari dokumen.
+   JANGAN kosongkan. Cari di bab: "Keunggulan Kompetitif", "Prospek Usaha", 
+   "Strategi Bisnis", atau ringkasan di halaman depan.
 
-    raise ValueError(f"LLM qualitative parse failed: {raw[:300]}")
+4. summary: HARUS 3 paragraf penuh, masing-masing minimal 3 kalimat.
+
+5. Output HANYA JSON murni — tidak ada teks lain di luar JSON."""
+
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL,
+            temperature=0.1,
+            max_tokens=8000,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"DOKUMEN PROSPEKTUS:\n\n{text[:380000]}"},
+            ],
+        )
+        raw    = resp.choices[0].message.content.strip()
+        result = _safe_json(raw)
+        if result:
+            return result
+
+        # Repair JSON jika parse gagal
+        fixed = re.sub(r",\s*([}\]])", r"\1", raw)
+        s, e  = fixed.find("{"), fixed.rfind("}") + 1
+        if s != -1 and e > s:
+            for end in range(e, s, -200):
+                try:
+                    return json.loads(fixed[s:end])
+                except Exception:
+                    pass
+
+        raise ValueError(f"JSON parse failed: {raw[:300]}")
+
+    except Exception as e:
+        logger.error(f"LLM qualitative error: {e}")
+        raise ValueError(f"Gagal memproses analisis kualitatif: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 6. TICKER SEARCH FALLBACK (jika tidak ada di dokumen)
+# 6. TICKER SEARCH — MULTI-SOURCE (Yahoo → IDX → Stooq)
 # ══════════════════════════════════════════════════════════════════════
 
 def search_ticker_by_name(company_name: str) -> str:
     """
     Cari ticker IDX menggunakan nama perusahaan lengkap.
-    Dipakai sebagai fallback jika ticker tidak ditemukan di dokumen.
+    Fallback jika ticker tidak ada di dokumen.
     Priority: Yahoo Finance → IDX API → Stooq
     """
     import requests
@@ -595,7 +588,7 @@ def search_ticker_by_name(company_name: str) -> str:
     if not cleaned:
         return ""
 
-    # 1. Yahoo Finance Search
+    # 1. Yahoo Finance
     try:
         resp = requests.get(
             "https://query2.finance.yahoo.com/v1/finance/search",
@@ -655,7 +648,7 @@ def analyze_prospectus(text: str, lang: str = "ID") -> dict:
     Analisis penuh prospektus IPO.
 
     Args:
-        text : teks prospektus (sudah diekstrak dari PDF)
+        text : teks prospektus yang sudah diekstrak dari PDF
         lang : "ID" → output Bahasa Indonesia | "EN" → output English
 
     Returns:
@@ -668,40 +661,43 @@ def analyze_prospectus(text: str, lang: str = "ID") -> dict:
     currency = detect_currency(text)
     unit     = detect_unit(text)
 
-    # Step 2: Ekstrak data keuangan via LLM multi-chunk
+    # Step 2: Ekstrak data keuangan (fase 1: single-pass, fase 2: chunk scan)
     fin_raw = llm_extract_financials(text)
     if not fin_raw.get("satuan"):
         fin_raw["satuan"] = unit
     if not fin_raw.get("mata_uang"):
         fin_raw["mata_uang"] = currency
 
-    # Step 3: Normalisasi + hitung KPI di Python
+    # Step 3: Normalisasi + hitung semua KPI di Python
     financial, kpi = normalize_and_compute(fin_raw, fx_rate)
 
-    # Step 4: Analisis kualitatif via LLM
+    # Step 4: Analisis kualitatif dengan bahasa sesuai lang
     result = llm_qualitative(text, kpi, financial, lang=lang)
 
-    # Attach data
+    # Step 5: Attach data keuangan & KPI
     result["financial"] = financial
     result["kpi"]       = kpi
 
-    # Step 5: Validasi & cari ticker
+    # Step 6: Validasi & cari ticker jika tidak ada di dokumen
     ticker = str(result.get("ticker") or "").strip().upper()
     if not ticker or not re.match(r"^[A-Z]{2,6}$", ticker):
         company_name = result.get("company_name", "")
         if company_name:
-            logger.info(f"Ticker tidak ada di dokumen, search by name: {company_name}")
+            logger.info(f"Ticker tidak ditemukan, search by name: '{company_name}'")
             ticker = search_ticker_by_name(company_name)
         result["ticker"] = ticker
     else:
         result["ticker"] = ticker
 
-    # Step 6: Validasi use_of_funds
+    # Step 7: Validasi use_of_funds
     uof = result.get("use_of_funds", [])
     if uof:
         total_alloc = sum(float(x.get("allocation") or 0) for x in uof)
-        # Jika total sangat jauh dari 100, kemungkinan LLM mengarang — set ke 0
-        if total_alloc > 150 or (total_alloc > 0 and total_alloc < 50):
-            logger.warning(f"use_of_funds total={total_alloc}, mungkin tidak akurat")
+        if total_alloc == 0:
+            logger.warning("use_of_funds: semua allocation = 0, data mungkin tidak lengkap")
+        elif total_alloc > 150:
+            logger.warning(f"use_of_funds: total allocation={total_alloc:.0f}, normalisasi ke 100")
+            for item in uof:
+                item["allocation"] = round(float(item.get("allocation") or 0) / total_alloc * 100, 1)
 
     return result
