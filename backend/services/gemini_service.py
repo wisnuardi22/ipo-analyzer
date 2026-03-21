@@ -147,22 +147,34 @@ def detect_fx_rate(text: str) -> Optional[float]:
 
 _FIN_SYSTEM = """Kamu adalah akuntan senior Indonesia. Tugasmu: ekstrak data keuangan dari teks prospektus IPO.
 
-CARI bagian-bagian ini di dokumen:
-1. "IKHTISAR DATA KEUANGAN PENTING" atau "DATA KEUANGAN PENTING"
-2. "LAPORAN LABA RUGI DAN PENGHASILAN KOMPREHENSIF"
-3. "LAPORAN POSISI KEUANGAN" atau "NERACA KONSOLIDASIAN"
-4. "SELECTED FINANCIAL DATA" atau "FINANCIAL HIGHLIGHTS"
-5. Halaman ringkasan di awal prospektus (biasanya ada tabel ikhtisar)
+LANGKAH 1 — CARI DATA DI BAGIAN-BAGIAN INI:
+1. "IKHTISAR DATA KEUANGAN PENTING" / "DATA KEUANGAN PENTING" / "RINGKASAN KEUANGAN"
+2. "RINGKASAN DATA KEUANGAN" — tabel yang menampilkan data per 31 Desember XXXX
+   (biasanya berisi kolom tahun: 31 Des 2021, 31 Des 2022, 31 Des 2023, dst.)
+3. "LAPORAN LABA RUGI DAN PENGHASILAN KOMPREHENSIF KONSOLIDASIAN"
+4. "LAPORAN POSISI KEUANGAN KONSOLIDASIAN" / "NERACA KONSOLIDASIAN"
+5. "SELECTED FINANCIAL DATA" / "FINANCIAL HIGHLIGHTS" / "FINANCIAL SUMMARY"
+6. Tabel ringkasan di halaman depan prospektus
 
-ATURAN EKSTRAKSI:
-- Baca header kolom tabel untuk mengetahui tahun yang tersedia
-- Tulis angka PERSIS seperti di dokumen (jangan ubah satuan)
-- Angka negatif dalam kurung (1.234) → tulis sebagai -1234
-- total_ekuitas, total_liabilitas, total_aset: ambil dari tahun TERAKHIR
-- total_saham_beredar: jumlah saham SETELAH IPO (biasanya di halaman depan)
-- harga_penawaran: harga per saham tanpa "Rp" (di halaman ringkasan penawaran)
-- Jika ada keterangan "dalam jutaan Rupiah" → satuan = "jutaan"
-- Jika tidak ada keterangan satuan → satuan = "full"
+LANGKAH 2 — ATURAN EKSTRAKSI:
+- Baca header kolom tabel → itulah daftar tahun yang tersedia
+- Tulis angka PERSIS seperti di dokumen, JANGAN ubah satuan
+- Angka negatif dalam kurung (1.234) atau dengan tanda minus → tulis -1234
+- total_ekuitas, total_liabilitas, total_aset → ambil dari tahun TERAKHIR di neraca
+- total_saham_beredar → jumlah saham beredar SETELAH IPO (ada di halaman depan/ringkasan)
+- harga_penawaran → harga per saham tanpa simbol "Rp" (ada di halaman ringkasan penawaran)
+- Satuan: "jutaan" / "ribuan" / "miliar" / "full" (lihat keterangan di header tabel)
+
+LANGKAH 3 — NILAI UNTUK PERHITUNGAN KPI (sistem akan hitung, kamu cukup ekstrak):
+Sistem butuh nilai-nilai ini untuk menghitung:
+  EPS  = laba_bersih_tahun_terakhir / total_saham_beredar
+  P/E  = harga_penawaran / EPS
+  P/B  = harga_penawaran / (total_ekuitas / total_saham_beredar)
+  ROE  = (laba_bersih / total_ekuitas) × 100%
+  D/E  = total_liabilitas / total_ekuitas
+  MarketCap = harga_penawaran × total_saham_beredar
+
+Pastikan kamu mengekstrak SEMUA nilai ini dari dokumen agar KPI dapat dihitung.
 
 KEMBALIKAN JSON DENGAN STRUKTUR PERSIS INI (isi dengan data nyata atau null):"""
 
@@ -184,6 +196,7 @@ _FIN_SCHEMA = {
 # Keywords untuk memilih chunk yang relevan secara keuangan
 _FIN_KEYWORDS = [
     "ikhtisar data keuangan", "data keuangan penting", "laporan laba rugi",
+    "ringkasan data keuangan", "ringkasan keuangan", "31 desember",
     "posisi keuangan", "neraca konsolidasian", "laba kotor", "laba usaha",
     "laba bersih", "pendapatan usaha", "pendapatan bersih", "penjualan bersih",
     "gross profit", "net revenue", "operating profit", "net income",
@@ -444,44 +457,64 @@ def llm_qualitative(text: str, kpi: Dict, financial: Dict, lang: str = "ID") -> 
     currency = financial.get("currency", "IDR")
     years    = financial.get("years", [])
 
-    # ── Instruksi bahasa yang eksplisit dan ketat ──
+    # ── Semua string yang bergantung pada bahasa di-evaluate di Python dulu ──
     if is_en:
-        lang_instruction = """CRITICAL LANGUAGE RULE: You MUST write ALL output fields in ENGLISH ONLY.
-This includes: summary, sector, use_of_funds descriptions, underwriter reputation,
-overall_risk_reason, all risk titles and descriptions, all benefit titles and descriptions.
-DO NOT use any Bahasa Indonesia words in the output. ENGLISH ONLY."""
+        lang_rule        = "CRITICAL: You MUST write ALL output text fields in ENGLISH ONLY. No Bahasa Indonesia at all."
+        sector_hint      = "Specific business sector in English (e.g. Gold Mining, Banking, Technology)"
+        summary_hint     = "3 PARAGRAPHS IN ENGLISH separated by \\n\\n. P1: Company profile with concrete numbers. P2: IPO details - shares, price, total proceeds. P3: Financial condition, growth, outlook."
+        category_hint    = "Category name in English"
+        desc_hint        = f"Specific description with project names and nominal values in {currency}"
+        reputation_hint  = "2-3 sentences analyzing underwriter track record in English"
+        risk_reason_hint = "2-3 sentences in English explaining why this risk level"
+        risk_title_hint  = "Risk title in English"
+        risk_desc_hint   = "1-2 sentences specific risk description in English with concrete facts"
+        benefit_title_hint = "Benefit/strength title in English"
+        benefit_desc_hint  = "1-2 sentences specific description in English with data and numbers"
+        rule_uof  = 'Find section "Use of Proceeds" in document. Fill 2-6 items. allocation must be NUMBER totaling 100. If no explicit percentage, estimate from nominal amounts.'
+        rule_risk = 'Fill 4-5 specific risks from the "Risk Factors" section. level must be "High", "Medium", or "Low".'
+        rule_ben  = 'Fill 4-6 specific competitive advantages from "Competitive Advantages", "Business Prospects", or front page summary. DO NOT leave empty.'
+        rule_sum  = "Write 3 full paragraphs, each at least 3 sentences."
     else:
-        lang_instruction = """ATURAN BAHASA WAJIB: Kamu HARUS menulis SEMUA field output dalam BAHASA INDONESIA.
-Ini termasuk: summary, sector, deskripsi use_of_funds, reputasi underwriter,
-overall_risk_reason, semua judul dan deskripsi risiko, semua judul dan deskripsi benefit.
-JANGAN gunakan kata-kata Bahasa Inggris kecuali istilah teknis keuangan umum (IPO, ROE, dll).
-BAHASA INDONESIA SAJA."""
+        lang_rule        = "WAJIB: Tulis SEMUA field teks output dalam BAHASA INDONESIA. Tidak ada kata Inggris kecuali istilah teknis (IPO, ROE, dll)."
+        sector_hint      = "Sektor bisnis spesifik (misal: Pertambangan Emas, Perbankan, Teknologi)"
+        summary_hint     = "3 PARAGRAF BAHASA INDONESIA dipisah \\n\\n. P1: Profil perusahaan dengan angka konkret. P2: Detail IPO - jumlah saham, harga, total dana. P3: Kondisi keuangan, pertumbuhan, prospek."
+        category_hint    = "Nama kategori dalam Bahasa Indonesia"
+        desc_hint        = f"Deskripsi spesifik dengan nama proyek dan nilai nominal dalam {currency}"
+        reputation_hint  = "2-3 kalimat analisis track record penjamin emisi dalam Bahasa Indonesia"
+        risk_reason_hint = "2-3 kalimat Bahasa Indonesia menjelaskan alasan level risiko ini"
+        risk_title_hint  = "Judul risiko dalam Bahasa Indonesia"
+        risk_desc_hint   = "1-2 kalimat deskripsi risiko spesifik Bahasa Indonesia dengan fakta konkret"
+        benefit_title_hint = "Judul keunggulan dalam Bahasa Indonesia"
+        benefit_desc_hint  = "1-2 kalimat deskripsi spesifik Bahasa Indonesia dengan data dan angka"
+        rule_uof  = 'Cari bagian "Rencana Penggunaan Dana" di dokumen. Isi 2-6 item. allocation harus NUMBER total 100. Jika tidak ada persentase eksplisit, estimasi dari nominal.'
+        rule_risk = 'Isi 4-5 risiko spesifik dari bab "Faktor Risiko". level harus "High", "Medium", atau "Low".'
+        rule_ben  = 'Isi 4-6 keunggulan spesifik dari bab "Keunggulan Kompetitif", "Prospek Usaha", atau halaman depan. JANGAN kosongkan.'
+        rule_sum  = "Tulis 3 paragraf penuh, masing-masing minimal 3 kalimat."
 
     system_prompt = f"""Kamu adalah analis IPO senior Indonesia yang berpengalaman 20 tahun.
 Tugasmu: analisis mendalam prospektus IPO dan hasilkan laporan lengkap.
 
-{lang_instruction}
-
+{lang_rule}
 Gunakan mata uang {currency} untuk semua nilai moneter.
 
 DATA KPI SUDAH DIHITUNG SISTEM — SALIN PERSIS NILAI INI, JANGAN HITUNG ULANG:
 {json.dumps(kpi, ensure_ascii=False)}
 Tahun data tersedia: {years}
 
-SCHEMA OUTPUT JSON (wajib ikuti struktur ini persis):
+OUTPUT JSON dengan struktur persis berikut:
 {{
-  "company_name": "Nama lengkap perusahaan Tbk (dari dokumen)",
-  "ticker": "Kode saham IDX 2-6 huruf KAPITAL. CARI di dokumen: Kode Saham, Kode Efek, Stock Code. Jika tidak ada -> string kosong",
-  "sector": "{'Specific business sector in English, e.g. Gold Mining, Banking, Technology' if is_en else 'Sektor bisnis spesifik, misal: Pertambangan Emas, Perbankan, Teknologi'}",
+  "company_name": "Nama lengkap perusahaan Tbk dari dokumen",
+  "ticker": "Kode saham IDX 2-6 huruf KAPITAL. Cari: Kode Saham, Kode Efek, Stock Code. Jika tidak ada -> string kosong",
+  "sector": "{sector_hint}",
   "ipo_date": "Tanggal pencatatan BEI dari dokumen",
   "share_price": "Harga penawaran final dari dokumen",
   "total_shares": "Total saham beredar setelah IPO dari dokumen",
   "market_cap": "SALIN PERSIS nilai market_cap dari DATA KPI di atas",
-  "summary": "{'3 PARAGRAPHS IN ENGLISH separated by double newline. P1: Company profile with concrete numbers. P2: IPO details - shares offered, percentage, price, total proceeds. P3: Financial condition, growth, outlook.' if is_en else '3 PARAGRAF BAHASA INDONESIA dipisah double newline. P1: Profil perusahaan dengan angka konkret. P2: Detail IPO - jumlah saham, persentase, harga, total dana. P3: Kondisi keuangan, pertumbuhan, prospek.'}",
+  "summary": "{summary_hint}",
   "use_of_funds": [
     {{
-      "category": "{'Category name in English' if is_en else 'Nama kategori'}",
-      "description": "{'Specific description with project names and nominal values in ' + currency if is_en else 'Deskripsi spesifik dengan nama proyek dan nilai nominal dalam ' + currency}",
+      "category": "{category_hint}",
+      "description": "{desc_hint}",
       "allocation": 60
     }}
   ],
@@ -489,40 +522,30 @@ SCHEMA OUTPUT JSON (wajib ikuti struktur ini persis):
     "lead": "Nama penjamin pelaksana emisi efek dari dokumen",
     "others": ["Daftar penjamin lainnya dari dokumen"],
     "type": "Full Commitment atau Best Efforts",
-    "reputation": "{'2-3 sentences track record analysis in English' if is_en else '2-3 kalimat analisis track record dalam Bahasa Indonesia'}"
+    "reputation": "{reputation_hint}"
   }},
   "overall_risk_level": "High atau Medium atau Low",
-  "overall_risk_reason": "{'2-3 sentences in English explaining the risk level' if is_en else '2-3 kalimat Bahasa Indonesia menjelaskan level risiko'}",
+  "overall_risk_reason": "{risk_reason_hint}",
   "risks": [
     {{
       "level": "High atau Medium atau Low",
-      "title": "{'Risk title in English' if is_en else 'Judul risiko Bahasa Indonesia'}",
-      "desc": "{'1-2 sentences specific description in English with concrete facts' if is_en else '1-2 kalimat deskripsi spesifik Bahasa Indonesia dengan fakta konkret'}"
+      "title": "{risk_title_hint}",
+      "desc": "{risk_desc_hint}"
     }}
   ],
   "benefits": [
     {{
-      "title": "{'Benefit title in English' if is_en else 'Judul keunggulan Bahasa Indonesia'}",
-      "desc": "{'1-2 sentences specific description in English with data/numbers' if is_en else '1-2 kalimat deskripsi spesifik Bahasa Indonesia dengan data/angka'}"
+      "title": "{benefit_title_hint}",
+      "desc": "{benefit_desc_hint}"
     }}
   ]
 }}
 
-ATURAN PENTING:
-1. use_of_funds: allocation HARUS berupa NUMBER (bukan string). Total allocation = 100.
-   Cari bagian "Rencana Penggunaan Dana" / "Use of Proceeds" di dokumen.
-   WAJIB isi 2-6 item. DILARANG semua allocation = 0.
-   Jika tidak ada persentase eksplisit, estimasi berdasarkan nominal yang disebutkan.
-
-2. risks: isi 4-5 item SPESIFIK dari dokumen (bab Faktor Risiko).
-   level HARUS salah satu dari: "High", "Medium", "Low" (huruf kapital pertama saja).
-
-3. benefits: isi 4-6 item SPESIFIK keunggulan kompetitif dari dokumen.
-   JANGAN kosongkan. Cari di bab: "Keunggulan Kompetitif", "Prospek Usaha", 
-   "Strategi Bisnis", atau ringkasan di halaman depan.
-
-4. summary: HARUS 3 paragraf penuh, masing-masing minimal 3 kalimat.
-
+ATURAN:
+1. use_of_funds: {rule_uof}
+2. risks: {rule_risk}
+3. benefits: {rule_ben}
+4. summary: {rule_sum}
 5. Output HANYA JSON murni — tidak ada teks lain di luar JSON."""
 
     try:
