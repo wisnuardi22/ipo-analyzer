@@ -252,6 +252,9 @@ const T = {
       trend_down: "Downtrend",
       trend_stable: "Stable",
       why: "Why this level?",
+      year_filter: "Year:",
+      latest: "Latest",
+      translating: "Translating...",
     },
     login: {
       title: "Sign In",
@@ -404,6 +407,9 @@ const T = {
       trend_down: "Tren Turun",
       trend_stable: "Stabil",
       why: "Mengapa level ini?",
+      year_filter: "Tahun:",
+      latest: "Terkini",
+      translating: "Menerjemahkan...",
     },
     login: {
       title: "Masuk",
@@ -419,14 +425,14 @@ const T = {
   },
 };
 
-// ── MOCK DATA (fallback) ───────────────────────────────────────
+// ── MOCK DATA ─────────────────────────────────────────────────
 const MOCK = {
   company: {
     name: "PT Contoh Tbk",
     ticker: "CONT",
     sector: "Technology - Financial Services",
     description:
-      "PT Contoh Tbk is a leading financial technology company focused on digital payment solutions and micro-lending for the SME segment in Indonesia. Founded in 2018, the company has served over 2 million active users nationwide with average revenue growth of 45% per year. The company aims to democratize access to financial services through innovative AI-driven credit scoring and seamless payment infrastructure.",
+      "PT Contoh Tbk is a leading financial technology company focused on digital payment solutions and micro-lending for the SME segment in Indonesia. Founded in 2018, the company has served over 2 million active users nationwide with average revenue growth of 45% per year.\n\nThe company aims to democratize access to financial services through innovative AI-driven credit scoring and seamless payment infrastructure.\n\nWith a strong foothold in Tier 1 cities, the company is now expanding into Tier 2 and Tier 3 markets, targeting an addressable market of over 60 million unbanked SMEs across Indonesia.",
     ipoDate: "15 March 2026",
     offerPrice: "Rp 500",
     currentPrice: "Rp 620",
@@ -442,8 +448,12 @@ const MOCK = {
     eps: "Rp 25",
     mktcap: "Rp 3,1 T",
   },
+  kpiByYear: {
+    roe_percent: { 2021: 12.1, 2022: 15.3, 2023: 16.8, 2024: 18.4 },
+    de_ratio: { 2021: 0.62, 2022: 0.54, 2023: 0.48, 2024: 0.45 },
+  },
+  financialYears: ["2021", "2022", "2023", "2024"],
   financialTrends: {
-    // Semua dalam PERSEN (%)
     revenue: [
       { year: "2021", value: 0 },
       { year: "2022", value: 54.2 },
@@ -470,63 +480,88 @@ const MOCK = {
     ],
   },
   useOfProceeds: [
-    { name: "R&D", value: 35, color: "#10B981" },
-    { name: "Ekspansi", value: 30, color: "#3B82F6" },
-    { name: "Operasional", value: 20, color: "#F59E0B" },
-    { name: "Akuisisi", value: 10, color: "#8B5CF6" },
-    { name: "Modal Kerja", value: 5, color: "#EC4899" },
+    {
+      name: "R&D",
+      value: 35,
+      color: "#10B981",
+      desc: "Product development and AI infrastructure",
+    },
+    {
+      name: "Ekspansi",
+      value: 30,
+      color: "#3B82F6",
+      desc: "Geographic expansion to Tier 2/3 cities",
+    },
+    {
+      name: "Operasional",
+      value: 20,
+      color: "#F59E0B",
+      desc: "Working capital and operations",
+    },
+    {
+      name: "Akuisisi",
+      value: 10,
+      color: "#8B5CF6",
+      desc: "Strategic acquisitions",
+    },
+    {
+      name: "Modal Kerja",
+      value: 5,
+      color: "#EC4899",
+      desc: "General working capital",
+    },
   ],
   riskFactors: [
     {
       level: "High",
-      title: "Persaingan pasar yang ketat",
-      desc: "Banyak kompetitor fintech lokal dan asing",
+      title: "Intense Market Competition",
+      desc: "Many local and foreign fintech competitors targeting the same SME segment with similar products.",
     },
     {
       level: "High",
-      title: "Risiko regulasi",
-      desc: "Perubahan regulasi OJK dapat mempengaruhi bisnis",
+      title: "Regulatory Risk",
+      desc: "Changes in OJK regulations could materially impact business model and lending operations.",
     },
     {
       level: "Medium",
-      title: "Risiko teknologi",
-      desc: "Ketergantungan pada infrastruktur cloud pihak ketiga",
+      title: "Technology Risk",
+      desc: "Dependence on third-party cloud infrastructure and potential cybersecurity vulnerabilities.",
     },
     {
       level: "Medium",
-      title: "Risiko kredit",
-      desc: "Potensi gagal bayar dari portofolio pinjaman mikro",
+      title: "Credit Risk",
+      desc: "Potential increase in non-performing loans from the micro-lending portfolio.",
     },
     {
       level: "Low",
-      title: "Risiko mata uang",
-      desc: "Eksposur terbatas pada transaksi valuta asing",
+      title: "Currency Risk",
+      desc: "Limited exposure to foreign currency transactions in current business operations.",
     },
   ],
   potentialBenefits: [
     {
       title: "Strong Market Position",
-      desc: "Market leader in digital SME lending segment with 35% market share",
+      desc: "Market leader in digital SME lending segment with 35% market share and strong brand recognition.",
     },
     {
       title: "High Revenue Growth",
-      desc: "45% CAGR over the last 4 years, consistently outperforming sector peers",
+      desc: "45% CAGR over the last 4 years, consistently outperforming sector peers and market benchmarks.",
     },
     {
       title: "92% Customer Retention",
-      desc: "Best-in-class user loyalty driven by seamless UX and competitive rates",
+      desc: "Best-in-class user loyalty driven by seamless UX, competitive rates, and personalized services.",
     },
     {
-      title: "Experienced Management Team",
-      desc: "CEO and CFO with combined 30+ years in fintech unicorn leadership",
+      title: "Experienced Management",
+      desc: "CEO and CFO with combined 30+ years in fintech unicorn leadership across Southeast Asia.",
     },
     {
       title: "Broad Digital Ecosystem",
-      desc: "Integration with 200+ e-commerce platforms enabling merchant network effects",
+      desc: "Integration with 200+ e-commerce platforms enabling powerful merchant network effects.",
     },
     {
       title: "Proprietary AI Technology",
-      desc: "Patented credit scoring AI with 94% accuracy, reducing NPL to under 1.2%",
+      desc: "Patented credit scoring AI with 94% accuracy, reducing NPL ratio to under 1.2%.",
     },
   ],
   trendTags: {
@@ -535,15 +570,25 @@ const MOCK = {
     operatingMargin: "up",
     ebitdaMargin: "up",
   },
+  riskLevel: "MEDIUM",
+  riskLabel: "Medium Risk",
+  riskColor: "#F59E0B",
+  riskReason:
+    "The company shows strong growth but operates in a highly competitive regulatory environment.",
+  underwriter: {
+    lead: "PT Mandiri Sekuritas",
+    others: ["PT BRI Danareksa Sekuritas", "PT Indo Premier Sekuritas"],
+    type: "Full Commitment",
+    reputation:
+      "PT Mandiri Sekuritas is one of Indonesia's top-tier investment banks with extensive experience leading major IPOs on the IDX.",
+  },
 };
 
-// ── Format helpers untuk display ──────────────────────────────────────────────
+// ── Format helpers ────────────────────────────────────────────
 const _fmtPrice = (val) => {
   if (!val) return "";
   const s = String(val).trim();
-  // Sudah ada Rp atau $ → return as is
   if (/^(Rp|USD|\$|US\$)/.test(s)) return s;
-  // Coba parse angka
   const num = parseFloat(s.replace(/[.,]/g, "").replace(",", "."));
   if (!isNaN(num)) return `Rp ${num.toLocaleString("id-ID")}`;
   return s;
@@ -552,12 +597,8 @@ const _fmtPrice = (val) => {
 const _fmtShares = (val) => {
   if (!val) return "";
   const s = String(val).trim();
-  // Sudah ada format teks → return as is jika sudah ada kata "lembar/saham/share"
-  if (/lembar|saham|share/i.test(s)) {
-    // Pastikan angkanya punya pemisah ribuan
+  if (/lembar|saham|share/i.test(s))
     return s.replace(/(\d+)(?=(\d{3})+(?!\d))/g, "$1.");
-  }
-  // Coba ekstrak angka
   const numStr = s.replace(/[^0-9]/g, "");
   if (!numStr) return s;
   const num = parseInt(numStr);
@@ -571,9 +612,7 @@ const _fmtShares = (val) => {
 const _fmtMarketCap = (val) => {
   if (!val) return "";
   const s = String(val).trim();
-  // Sudah format lengkap (ada T/M/B/miliar) → return as is
   if (/[TMBtmb]$|triliun|miliar|billion/i.test(s)) return s;
-  // Sudah ada Rp tapi tanpa T/M → cek apakah perlu diformat
   const numStr = s.replace(/[^0-9]/g, "");
   if (!numStr) return s;
   const num = parseFloat(numStr);
@@ -585,7 +624,6 @@ const _fmtMarketCap = (val) => {
   return `Rp ${num.toLocaleString("id-ID")}`;
 };
 
-// ── Risk level helpers ────────────────────────────────────────────────────────
 const _computeRiskLevel = (risks) => {
   const p = { high: 3, medium: 2, low: 1 };
   const max = risks.reduce(
@@ -595,16 +633,104 @@ const _computeRiskLevel = (risks) => {
   return max >= 3 ? "HIGH" : max === 2 ? "MEDIUM" : "LOW";
 };
 const _computeRiskLabel = (risks) => {
-  const lvl = _computeRiskLevel(risks);
-  return lvl === "HIGH"
+  const l = _computeRiskLevel(risks);
+  return l === "HIGH"
     ? "Risiko Tinggi"
-    : lvl === "LOW"
+    : l === "LOW"
       ? "Risiko Rendah"
       : "Risiko Sedang";
 };
 const _computeRiskColor = (risks) => {
-  const lvl = _computeRiskLevel(risks);
-  return lvl === "HIGH" ? "#EF4444" : lvl === "LOW" ? "#22C55E" : "#F59E0B";
+  const l = _computeRiskLevel(risks);
+  return l === "HIGH" ? "#EF4444" : l === "LOW" ? "#22C55E" : "#F59E0B";
+};
+
+// ── Helper: build mapped data from API response ───────────────
+const _buildMapped = (d) => {
+  const toNum = (v) =>
+    v === null || v === undefined
+      ? null
+      : parseFloat(String(v).replace("%", ""));
+  const normFinancial = (arr) => {
+    if (!arr || !Array.isArray(arr) || arr.length === 0) return null;
+    const result = arr
+      .map((item) => ({
+        year: String(item.year || ""),
+        value: toNum(item.value),
+      }))
+      .filter((x) => x.year && x.value !== null && !isNaN(x.value));
+    return result.length > 0 ? result : null;
+  };
+  const trendTag = (arr) => {
+    if (!arr || arr.length < 2) return null;
+    const valid = arr.filter((x) => x.value !== null);
+    if (valid.length < 2) return null;
+    const diff = valid[valid.length - 1].value - valid[0].value;
+    if (diff > 2) return "up";
+    if (diff < -2) return "down";
+    return "stable";
+  };
+  const ticker = d.ticker || d.ipo_details?.ticker || "";
+  const kpiData =
+    d.kpi && Object.keys(d.kpi).length > 0 ? d.kpi : d.ipo_details?.kpi || {};
+  const uofData =
+    d.use_of_funds?.length > 0
+      ? d.use_of_funds
+      : d.ipo_details?.use_of_funds || [];
+  const finData = d.financial || {};
+  return {
+    company: {
+      name: d.company_name || "",
+      ticker,
+      sector: d.sector || d.ipo_details?.sector || "",
+      description: d.summary || "",
+      ipoDate: d.ipo_date || d.ipo_details?.ipo_date || "",
+      offerPrice: _fmtPrice(d.share_price || d.ipo_details?.share_price),
+      currentPrice: d.current_price || d.ipo_details?.current_price || "",
+      totalShares: _fmtShares(d.total_shares || d.ipo_details?.total_shares),
+      marketCap: _fmtMarketCap(d.market_cap || d.ipo_details?.market_cap),
+      currency: finData.currency || "IDR",
+    },
+    kpi: {
+      pe: kpiData.pe || "N/A",
+      pb: kpiData.pb || "N/A",
+      roe: kpiData.roe || "N/A",
+      der: kpiData.der || "N/A",
+      eps: kpiData.eps || "N/A",
+      mktcap:
+        kpiData.market_cap ||
+        d.market_cap ||
+        d.ipo_details?.market_cap ||
+        "N/A",
+    },
+    kpiByYear: kpiData,
+    financialYears: finData.years || [],
+    financialTrends: {
+      revenue: normFinancial(finData.revenue_growth) || [],
+      grossMargin: normFinancial(finData.gross_margin) || [],
+      operatingMargin: normFinancial(finData.operating_margin) || [],
+      ebitdaMargin: normFinancial(finData.ebitda_margin) || [],
+    },
+    trendTags: {
+      revenue: trendTag(normFinancial(finData.revenue_growth)),
+      grossMargin: trendTag(normFinancial(finData.gross_margin)),
+      operatingMargin: trendTag(normFinancial(finData.operating_margin)),
+      ebitdaMargin: trendTag(normFinancial(finData.ebitda_margin)),
+    },
+    useOfProceeds: uofData.map((x, i) => ({
+      name: x.category || x.name || "",
+      value: x.allocation || x.value || 0,
+      desc: x.description || "",
+      color: ["#10B981", "#3B82F6", "#F59E0B", "#8B5CF6", "#EC4899"][i % 5],
+    })),
+    riskFactors: d.risks || [],
+    potentialBenefits: d.benefits || [],
+    riskLevel: d.risk_level || _computeRiskLevel(d.risks || []),
+    riskLabel: d.risk_label || _computeRiskLabel(d.risks || []),
+    riskColor: d.risk_color || _computeRiskColor(d.risks || []),
+    riskReason: d.risk_reason || "",
+    underwriter: d.underwriter || d.ipo_details?.underwriter || null,
+  };
 };
 
 export default function App() {
@@ -622,9 +748,6 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [livePrice, setLivePrice] = useState(null);
   const [priceLoading, setPriceLoading] = useState(false);
-  const tvTickerRef = useRef(null);
-  const tvMiniChartRef = useRef(null);
-  const tvSymbolRef = useRef(null);
   const [contactForm, setContactForm] = useState({
     name: "",
     email: "",
@@ -636,6 +759,12 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginErr, setLoginErr] = useState("");
+  // ── NEW STATES ──
+  const [analysisId, setAnalysisId] = useState(null);
+  const [kpiYear, setKpiYear] = useState(null); // null = tahun terakhir (default)
+
+  const tvSymbolRef = useRef(null);
+  const tvMiniChartRef = useRef(null);
   const fileRef = useRef();
   const l = T[lang];
 
@@ -644,15 +773,9 @@ export default function App() {
     else document.documentElement.classList.remove("dark");
   }, [dark]);
 
-  // Auto-load TradingView widgets when ticker becomes available
   useEffect(() => {
-    if (ready && data) {
-      const ticker =
-        data?.ipo_details?.ticker || data?.ipo_details?.ticker_code || "";
-      if (ticker) {
-        // Small delay to ensure DOM is ready
-        setTimeout(() => loadTradingViewWidgets(ticker), 400);
-      }
+    if (ready && data?.company?.ticker) {
+      setTimeout(() => loadTradingViewWidgets(data.company.ticker), 400);
     }
   }, [ready, data]);
 
@@ -661,12 +784,9 @@ export default function App() {
     setMenu(false);
   };
 
-  // ── TradingView widget loader ──
   const loadTradingViewWidgets = (ticker) => {
     if (!ticker) return;
     const symbol = `IDX:${ticker}`;
-
-    // Single Quote widget (harga + % change real-time)
     if (tvSymbolRef.current) {
       tvSymbolRef.current.innerHTML = "";
       const s1 = document.createElement("script");
@@ -682,8 +802,6 @@ export default function App() {
       });
       tvSymbolRef.current.appendChild(s1);
     }
-
-    // Mini Chart widget (grafik 1 bulan)
     if (tvMiniChartRef.current) {
       tvMiniChartRef.current.innerHTML = "";
       const s2 = document.createElement("script");
@@ -705,10 +823,8 @@ export default function App() {
     }
   };
 
-  // backward compat shim
   const fetchLivePrice = (ticker) => loadTradingViewWidgets(ticker);
 
-  // ── upload file ──
   const handleFile = (f) => {
     if (!f || f.type !== "application/pdf") return;
     setFile(f);
@@ -716,7 +832,7 @@ export default function App() {
     setStatus(l.svc.uploaded);
   };
 
-  // ── analyze ──
+  // ── ANALYZE ──
   const handleAnalyze = async () => {
     if (!file) return;
     setAnalyzing(true);
@@ -725,6 +841,7 @@ export default function App() {
       const fd = new FormData();
       fd.append("file", file);
       const up = await axios.post(`${API_BASE}/upload`, fd);
+      setAnalysisId(up.data.analysis_id); // ← simpan ID untuk re-analyze
       setStatus(
         lang === "EN"
           ? "AI is analyzing document..."
@@ -735,122 +852,41 @@ export default function App() {
         `${API_BASE}/analysis/${up.data.analysis_id}`,
       );
       const d = res.data;
-      // DEBUG lightweight
       console.log(
         "API OK:",
         d.company_name,
         "| kpi:",
         d.kpi,
-        "| use_of_funds:",
-        d.use_of_funds?.length,
-        "| financial years:",
+        "| years:",
         d.financial?.years,
       );
-
-      // Ticker
-      const ticker = d.ticker || d.ipo_details?.ticker || "";
-
-      // Helper: angka dari string/persen
-      const toNum = (v) =>
-        v === null || v === undefined
-          ? null
-          : parseFloat(String(v).replace("%", ""));
-
-      // Normalisasi array financial
-      const normFinancial = (arr) => {
-        if (!arr || !Array.isArray(arr) || arr.length === 0) return null;
-        const result = arr
-          .map((item) => ({
-            year: String(item.year || ""),
-            value: toNum(item.value),
-          }))
-          .filter((x) => x.year && x.value !== null && !isNaN(x.value));
-        return result.length > 0 ? result : null;
-      };
-
-      const trendTag = (arr) => {
-        if (!arr || arr.length < 2) return null;
-        const valid = arr.filter((x) => x.value !== null);
-        if (valid.length < 2) return null;
-        const diff = valid[valid.length - 1].value - valid[0].value;
-        if (diff > 2) return "up";
-        if (diff < -2) return "down";
-        return "stable";
-      };
-
-      // Ambil kpi & use_of_funds dari root (prioritas) atau ipo_details (fallback)
-      const kpiData =
-        d.kpi && Object.keys(d.kpi).length > 0
-          ? d.kpi
-          : d.ipo_details?.kpi || {};
-      const uofData =
-        d.use_of_funds?.length > 0
-          ? d.use_of_funds
-          : d.ipo_details?.use_of_funds || [];
-      const finData = d.financial || {};
-
-      const mapped = {
-        company: {
-          name: d.company_name || "",
-          ticker,
-          sector: d.sector || d.ipo_details?.sector || "",
-          description: d.summary || "",
-          ipoDate: d.ipo_date || d.ipo_details?.ipo_date || "",
-          offerPrice: _fmtPrice(d.share_price || d.ipo_details?.share_price),
-          currentPrice: d.current_price || d.ipo_details?.current_price || "",
-          totalShares: _fmtShares(
-            d.total_shares || d.ipo_details?.total_shares,
-          ),
-          marketCap: _fmtMarketCap(d.market_cap || d.ipo_details?.market_cap),
-          currency: finData.currency || "IDR",
-        },
-        kpi: {
-          pe: kpiData.pe || "N/A",
-          pb: kpiData.pb || "N/A",
-          roe: kpiData.roe || "N/A",
-          der: kpiData.der || "N/A",
-          eps: kpiData.eps || "N/A",
-          mktcap:
-            kpiData.market_cap ||
-            d.market_cap ||
-            d.ipo_details?.market_cap ||
-            "N/A",
-        },
-        financialTrends: {
-          revenue: normFinancial(finData.revenue_growth) || [],
-          grossMargin: normFinancial(finData.gross_margin) || [],
-          operatingMargin: normFinancial(finData.operating_margin) || [],
-          ebitdaMargin: normFinancial(finData.ebitda_margin) || [],
-        },
-        trendTags: {
-          revenue: trendTag(normFinancial(finData.revenue_growth)),
-          grossMargin: trendTag(normFinancial(finData.gross_margin)),
-          operatingMargin: trendTag(normFinancial(finData.operating_margin)),
-          ebitdaMargin: trendTag(normFinancial(finData.ebitda_margin)),
-        },
-        useOfProceeds: uofData.map((x, i) => ({
-          name: x.category || x.name || "",
-          value: x.allocation || x.value || 0,
-          desc: x.description || "",
-          color: ["#10B981", "#3B82F6", "#F59E0B", "#8B5CF6", "#EC4899"][i % 5],
-        })),
-        riskFactors: d.risks || [],
-        potentialBenefits: d.benefits || [],
-        riskLevel: d.risk_level || _computeRiskLevel(d.risks || []),
-        riskLabel: d.risk_label || _computeRiskLabel(d.risks || []),
-        riskColor: d.risk_color || _computeRiskColor(d.risks || []),
-        riskReason: d.risk_reason || "",
-        underwriter: d.underwriter || d.ipo_details?.underwriter || null,
-      };
-      setData(mapped);
+      setData(_buildMapped(d));
+      setKpiYear(null);
       setReady(true);
       setStatus("");
+      const ticker = d.ticker || d.ipo_details?.ticker || "";
       if (ticker) fetchLivePrice(ticker);
       setTimeout(() => go("dashboard"), 600);
     } catch (e) {
       setStatus("Error: " + (e.response?.data?.detail || e.message));
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  // ── HANDLE LANG CHANGE — re-analyze jika dashboard sudah tampil ──
+  const handleLangChange = async (newLang) => {
+    setLang(newLang);
+    if (!ready || !analysisId) return;
+    try {
+      setStatus(newLang === "EN" ? "Translating..." : "Menerjemahkan...");
+      await axios.post(`${API_BASE}/analyze/${analysisId}`, { lang: newLang });
+      const res = await axios.get(`${API_BASE}/analysis/${analysisId}`);
+      setData(_buildMapped(res.data));
+      setKpiYear(null);
+      setStatus("");
+    } catch (e) {
+      setStatus("Error: " + (e.response?.data?.detail || e.message));
     }
   };
 
@@ -889,13 +925,6 @@ export default function App() {
       Medium: "border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20",
       Low: "border-green-500 bg-green-50 dark:bg-green-900/20",
     })[level] || "border-gray-300 bg-gray-50";
-  const riskBadge = (level) =>
-    ({
-      High: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-      Medium:
-        "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300",
-      Low: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-    })[level] || "";
 
   return (
     <div
@@ -1005,8 +1034,9 @@ export default function App() {
               ))}
             </nav>
             <div className="flex items-center gap-3">
+              {/* ── LANG TOGGLE — memanggil handleLangChange ── */}
               <button
-                onClick={() => setLang(lang === "EN" ? "ID" : "EN")}
+                onClick={() => handleLangChange(lang === "EN" ? "ID" : "EN")}
                 className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 rounded-full text-sm font-bold text-gray-700 dark:text-gray-300 transition-colors"
               >
                 <Globe className="w-4 h-4" />
@@ -1142,8 +1172,6 @@ export default function App() {
               {l.svc.sub}
             </p>
           </div>
-
-          {/* Pricing Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto mb-16">
             {[
               {
@@ -1207,10 +1235,8 @@ export default function App() {
             ))}
           </div>
 
-          {/* Upload Steps — only when plan selected */}
           {plan && (
             <div className="max-w-4xl mx-auto space-y-8">
-              {/* Step 1 */}
               <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl p-6">
                 <div className="flex items-start gap-4">
                   <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">
@@ -1235,8 +1261,6 @@ export default function App() {
                   </div>
                 </div>
               </div>
-
-              {/* Step 2 — Upload */}
               <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-2xl p-6">
                 <div className="flex items-start gap-4 mb-6">
                   <div className="w-8 h-8 bg-emerald-600 rounded-full flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">
@@ -1251,8 +1275,6 @@ export default function App() {
                     </p>
                   </div>
                 </div>
-
-                {/* Drop Zone */}
                 <div
                   onDragOver={(e) => {
                     e.preventDefault();
@@ -1328,8 +1350,6 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-
-                {/* Status message */}
                 {status && (
                   <p
                     className={`text-center mt-3 text-sm font-medium ${status.startsWith("Error") ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}
@@ -1337,8 +1357,6 @@ export default function App() {
                     {status}
                   </p>
                 )}
-
-                {/* ANALYZE BUTTON — shown after file selected */}
                 {fileName && (
                   <div className="mt-6 flex justify-center">
                     <button
@@ -1366,11 +1384,11 @@ export default function App() {
         </div>
       </section>
 
-      {/* ── DASHBOARD — muncul di bawah service setelah analyze ── */}
+      {/* ── DASHBOARD ── */}
       {ready && (
         <section id="dashboard" className="py-20 bg-slate-50 dark:bg-gray-800">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            {/* Header dashboard */}
+            {/* Header */}
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-10 gap-4">
               <div>
                 <div className="inline-flex items-center gap-2 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 rounded-full px-4 py-1.5 mb-3">
@@ -1392,6 +1410,11 @@ export default function App() {
                 </p>
               </div>
               <div className="flex items-center gap-3">
+                {status && (
+                  <span className="text-sm text-emerald-600 dark:text-emerald-400 font-medium animate-pulse">
+                    {status}
+                  </span>
+                )}
                 <button
                   onClick={() => {
                     setReady(false);
@@ -1399,6 +1422,8 @@ export default function App() {
                     setFile(null);
                     setData(null);
                     setStatus("");
+                    setAnalysisId(null);
+                    setKpiYear(null);
                   }}
                   className="inline-flex items-center gap-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 px-4 py-2.5 rounded-lg font-semibold text-sm transition-colors"
                 >
@@ -1408,7 +1433,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* ── IPO SUMMARY CARDS ── */}
+            {/* IPO Summary Cards */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-6 mb-8 text-white">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-white/5 rounded-xl p-4 border border-white/10">
@@ -1459,7 +1484,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* ── COMPANY PROFILE ── */}
+            {/* Company Profile */}
             <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-8 mb-8">
               <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
                 <div>
@@ -1488,7 +1513,10 @@ export default function App() {
                   )}
                   {D.company.currency && D.company.currency !== "IDR" && (
                     <span className="inline-flex items-center gap-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs font-semibold px-3 py-1 rounded-full">
-                      📊 Laporan dalam {D.company.currency}
+                      📊{" "}
+                      {lang === "EN"
+                        ? `Report in ${D.company.currency}`
+                        : `Laporan dalam ${D.company.currency}`}
                     </span>
                   )}
                 </div>
@@ -1503,60 +1531,150 @@ export default function App() {
               </div>
             </div>
 
-            {/* ── KPI CARDS — 5 item tetap ── */}
+            {/* ── KPI SECTION dengan Year Filter ── */}
             <div className="mb-8">
-              <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-                {l.dash.kpi}
-              </h3>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                {[
-                  {
-                    label: l.dash.pe,
-                    val: D.kpi.pe,
-                    color: "text-blue-600 dark:text-blue-400",
-                    bg: "bg-blue-50 dark:bg-blue-900/20",
-                  },
-                  {
-                    label: l.dash.pb,
-                    val: D.kpi.pb,
-                    color: "text-purple-600 dark:text-purple-400",
-                    bg: "bg-purple-50 dark:bg-purple-900/20",
-                  },
-                  {
-                    label: l.dash.roe,
-                    val: D.kpi.roe,
-                    color: "text-emerald-600 dark:text-emerald-400",
-                    bg: "bg-emerald-50 dark:bg-emerald-900/20",
-                  },
-                  {
-                    label: l.dash.der,
-                    val: D.kpi.der,
-                    color: "text-orange-600 dark:text-orange-400",
-                    bg: "bg-orange-50 dark:bg-orange-900/20",
-                  },
-                  {
-                    label: l.dash.eps,
-                    val: D.kpi.eps,
-                    color: "text-cyan-600 dark:text-cyan-400",
-                    bg: "bg-cyan-50 dark:bg-cyan-900/20",
-                  },
-                ].map((k, i) => (
-                  <div
-                    key={i}
-                    className={`${k.bg} rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm text-center`}
-                  >
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 font-medium">
-                      {k.label}
-                    </p>
-                    <p className={`text-xl font-bold ${k.color}`}>
-                      {k.val || "—"}
-                    </p>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  {l.dash.kpi}
+                </h3>
+                {/* Year filter — hanya tampil jika ada multiple years */}
+                {D.financialYears && D.financialYears.length > 1 && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm text-gray-500 dark:text-gray-400">
+                      {l.dash.year_filter}
+                    </span>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {D.financialYears.map((yr) => {
+                        const isActive =
+                          kpiYear === yr ||
+                          (kpiYear === null &&
+                            yr ===
+                              D.financialYears[D.financialYears.length - 1]);
+                        return (
+                          <button
+                            key={yr}
+                            onClick={() =>
+                              setKpiYear(kpiYear === yr ? null : yr)
+                            }
+                            className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${isActive ? "bg-emerald-500 text-white shadow-sm" : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30"}`}
+                          >
+                            {yr}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <span className="text-xs text-gray-400 dark:text-gray-500 italic">
+                      {lang === "EN"
+                        ? "* PE, PB, EPS based on IPO price"
+                        : "* PE, PB, EPS berdasarkan harga IPO"}
+                    </span>
                   </div>
-                ))}
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                {(() => {
+                  const activeYear =
+                    kpiYear ||
+                    (D.financialYears?.length > 0
+                      ? D.financialYears[D.financialYears.length - 1]
+                      : null);
+
+                  // Ambil nilai KPI per tahun jika ada (dari kpiByYear)
+                  const getYearVal = (field, fallback) => {
+                    if (!activeYear || !D.kpiByYear) return fallback;
+                    const yearData = D.kpiByYear[field];
+                    if (
+                      yearData &&
+                      typeof yearData === "object" &&
+                      !Array.isArray(yearData)
+                    ) {
+                      const v = yearData[activeYear];
+                      if (
+                        v !== undefined &&
+                        v !== null &&
+                        String(v).toUpperCase() !== "N/A"
+                      ) {
+                        const num = parseFloat(v);
+                        if (!isNaN(num)) {
+                          if (field === "roe_percent")
+                            return `${num.toFixed(1)}%`;
+                          if (field === "de_ratio") return `${num.toFixed(2)}x`;
+                          return String(v);
+                        }
+                      }
+                    }
+                    return fallback;
+                  };
+
+                  const cards = [
+                    {
+                      label: l.dash.pe,
+                      val: D.kpi.pe,
+                      color: "text-blue-600 dark:text-blue-400",
+                      bg: "bg-blue-50 dark:bg-blue-900/20",
+                      note: lang === "EN" ? "At IPO price" : "Pada harga IPO",
+                    },
+                    {
+                      label: l.dash.pb,
+                      val: D.kpi.pb,
+                      color: "text-purple-600 dark:text-purple-400",
+                      bg: "bg-purple-50 dark:bg-purple-900/20",
+                      note: lang === "EN" ? "At IPO price" : "Pada harga IPO",
+                    },
+                    {
+                      label: l.dash.roe,
+                      val: getYearVal("roe_percent", D.kpi.roe),
+                      color: "text-emerald-600 dark:text-emerald-400",
+                      bg: "bg-emerald-50 dark:bg-emerald-900/20",
+                      note: activeYear || "",
+                    },
+                    {
+                      label: l.dash.der,
+                      val: getYearVal("de_ratio", D.kpi.der),
+                      color: "text-orange-600 dark:text-orange-400",
+                      bg: "bg-orange-50 dark:bg-orange-900/20",
+                      note: activeYear || "",
+                    },
+                    {
+                      label: l.dash.eps,
+                      val: D.kpi.eps,
+                      color: "text-cyan-600 dark:text-cyan-400",
+                      bg: "bg-cyan-50 dark:bg-cyan-900/20",
+                      note: lang === "EN" ? "Latest year" : "Tahun terakhir",
+                    },
+                    {
+                      label: l.dash.mktcap,
+                      val: D.kpi.mktcap || D.company.marketCap,
+                      color: "text-rose-600 dark:text-rose-400",
+                      bg: "bg-rose-50 dark:bg-rose-900/20",
+                      note: lang === "EN" ? "At IPO price" : "Pada harga IPO",
+                    },
+                  ];
+
+                  return cards.map((k, i) => (
+                    <div
+                      key={i}
+                      className={`${k.bg} rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm text-center`}
+                    >
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 font-medium">
+                        {k.label}
+                      </p>
+                      <p className={`text-xl font-bold ${k.color}`}>
+                        {k.val || "—"}
+                      </p>
+                      {k.note && (
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
+                          {k.note}
+                        </p>
+                      )}
+                    </div>
+                  ));
+                })()}
               </div>
             </div>
 
-            {/* ── FINANCIAL CHARTS (2x2 grid) ── */}
+            {/* Financial Charts */}
             <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-8 mb-8">
               <div className="flex items-start justify-between mb-1">
                 <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -1625,7 +1743,6 @@ export default function App() {
                         valid.reduce((s, x) => s + x.value, 0) / valid.length
                       ).toFixed(1)
                     : null;
-                  // ── Dinamis: 1 tahun → bar chart, >1 tahun → line chart ──
                   const chartType =
                     (ch.data?.length || 0) <= 1 ? "bar" : "line";
                   if (!ch.data || ch.data.length === 0)
@@ -1653,13 +1770,7 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           {tag && (
                             <span
-                              className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
-                                tag === "up"
-                                  ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400"
-                                  : tag === "down"
-                                    ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
-                                    : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
-                              }`}
+                              className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${tag === "up" ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : tag === "down" ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"}`}
                             >
                               {tag === "up" ? "↑" : tag === "down" ? "↓" : "→"}
                               {tag === "up"
@@ -1767,7 +1878,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* ── USE OF PROCEEDS + RISK vs BENEFIT (side by side persis Figma) ── */}
+            {/* Use of Proceeds + Risk & Benefits */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
               {/* Use of Proceeds */}
               <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-8">
@@ -1806,9 +1917,7 @@ export default function App() {
                             dominantBaseline="central"
                             fontSize={12}
                             fontWeight="bold"
-                          >
-                            {`${value}%`}
-                          </text>
+                          >{`${value}%`}</text>
                         ) : null;
                       }}
                       labelLine={false}
@@ -1823,7 +1932,6 @@ export default function App() {
                     />
                   </PieChart>
                 </ResponsiveContainer>
-                {/* Static legend with % + description */}
                 <div className="mt-3 grid grid-cols-1 gap-3">
                   {D.useOfProceeds.map((e, i) => (
                     <div key={i} className="flex items-start gap-3 px-1">
@@ -1854,13 +1962,12 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Risk & Benefits — full redesign */}
+              {/* Risk & Benefits */}
               <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-8">
                 <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
                   {l.dash.risk}
                 </h3>
-
-                {/* ── Overall Risk Badge — SATU LEVEL SAJA ── */}
+                {/* Overall Risk Badge */}
                 <div className="mb-5">
                   <div className="flex items-center gap-3 mb-2">
                     <div
@@ -1888,18 +1995,17 @@ export default function App() {
                   )}
                 </div>
 
-                {/* ── Underwriter Info jika ada ── */}
+                {/* Underwriter */}
                 {D.underwriter &&
                   D.underwriter.lead &&
                   (() => {
-                    // ── Hitung rating bintang dari reputasi ──
                     const rep = (D.underwriter.reputation || "").toLowerCase();
                     const isFullCommit =
                       (D.underwriter.type || "")
                         .toLowerCase()
                         .includes("penuh") ||
                       (D.underwriter.type || "").toLowerCase().includes("full");
-                    let stars = 3; // default medium
+                    let stars = 3;
                     if (
                       /sangat baik|terbesar|tier.?1|top tier|terkemuka|mandiri sekuritas|bca sekuritas|bri danareksa|mirae|trimegah|bahana|cgs.?cimb|indo premier/i.test(
                         rep,
@@ -1907,7 +2013,9 @@ export default function App() {
                     )
                       stars = 5;
                     else if (
-                      /baik|cukup dikenal|bereputasi|terpercaya/i.test(rep)
+                      /baik|cukup dikenal|bereputasi|terpercaya|reputable|prominent|established|leading|trusted/i.test(
+                        rep,
+                      )
                     )
                       stars = 4;
                     else if (/kurang dikenal|perlu diwaspadai|kecil/i.test(rep))
@@ -1920,6 +2028,8 @@ export default function App() {
                       const full = Math.floor(rating);
                       const half = rating % 1 >= 0.5;
                       const empty = 5 - full - (half ? 1 : 0);
+                      const starPath =
+                        "M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z";
                       return (
                         <div className="flex items-center gap-0.5">
                           {[...Array(full)].map((_, i) => (
@@ -1929,7 +2039,7 @@ export default function App() {
                               fill="currentColor"
                               viewBox="0 0 20 20"
                             >
-                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                              <path d={starPath} />
                             </svg>
                           ))}
                           {half && (
@@ -1944,10 +2054,7 @@ export default function App() {
                                   <stop offset="50%" stopColor="transparent" />
                                 </linearGradient>
                               </defs>
-                              <path
-                                fill="url(#half)"
-                                d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"
-                              />
+                              <path fill="url(#half)" d={starPath} />
                             </svg>
                           )}
                           {[...Array(empty)].map((_, i) => (
@@ -1957,7 +2064,7 @@ export default function App() {
                               fill="currentColor"
                               viewBox="0 0 20 20"
                             >
-                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                              <path d={starPath} />
                             </svg>
                           ))}
                           <span className="text-xs font-bold text-amber-500 ml-1">
@@ -1966,7 +2073,6 @@ export default function App() {
                         </div>
                       );
                     };
-
                     const ratingLabel =
                       stars >= 4.5
                         ? lang === "EN"
@@ -1983,10 +2089,8 @@ export default function App() {
                             : lang === "EN"
                               ? "Below Average"
                               : "Kurang";
-
                     return (
                       <div className="mb-5 rounded-2xl overflow-hidden border border-blue-200 dark:border-blue-800 shadow-sm">
-                        {/* Header */}
                         <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-5 py-3 flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="text-white text-base">🏦</span>
@@ -2003,10 +2107,7 @@ export default function App() {
                             </span>
                           </div>
                         </div>
-
-                        {/* Body */}
                         <div className="bg-white dark:bg-gray-900 px-5 py-4 space-y-3">
-                          {/* Penjamin Pelaksana Utama */}
                           <div>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
                               {lang === "EN"
@@ -2024,8 +2125,6 @@ export default function App() {
                               )}
                             </div>
                           </div>
-
-                          {/* Co-underwriter */}
                           {D.underwriter.others?.length > 0 && (
                             <div>
                               <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
@@ -2045,8 +2144,6 @@ export default function App() {
                               </div>
                             </div>
                           )}
-
-                          {/* Jenis Penjaminan */}
                           {D.underwriter.type && (
                             <div className="flex items-center gap-2">
                               <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -2056,18 +2153,12 @@ export default function App() {
                                 :
                               </span>
                               <span
-                                className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                                  isFullCommit
-                                    ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
-                                    : "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300"
-                                }`}
+                                className={`text-xs font-semibold px-2 py-0.5 rounded-full ${isFullCommit ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300" : "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300"}`}
                               >
                                 {D.underwriter.type}
                               </span>
                             </div>
                           )}
-
-                          {/* Reputasi */}
                           {D.underwriter.reputation && (
                             <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
                               <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
@@ -2103,23 +2194,10 @@ export default function App() {
                         return (
                           <div
                             key={i}
-                            className={`rounded-xl overflow-hidden border ${
-                              level === "High"
-                                ? "border-red-200 dark:border-red-800"
-                                : level === "Low"
-                                  ? "border-green-200 dark:border-green-800"
-                                  : "border-yellow-200 dark:border-yellow-800"
-                            }`}
+                            className={`rounded-xl overflow-hidden border ${level === "High" ? "border-red-200 dark:border-red-800" : level === "Low" ? "border-green-200 dark:border-green-800" : "border-yellow-200 dark:border-yellow-800"}`}
                           >
-                            {/* Header: icon + judul saja, TANPA badge level */}
                             <div
-                              className={`flex items-center gap-2 px-4 py-2.5 ${
-                                level === "High"
-                                  ? "bg-red-50 dark:bg-red-900/30"
-                                  : level === "Low"
-                                    ? "bg-green-50 dark:bg-green-900/30"
-                                    : "bg-yellow-50 dark:bg-yellow-900/30"
-                              }`}
+                              className={`flex items-center gap-2 px-4 py-2.5 ${level === "High" ? "bg-red-50 dark:bg-red-900/30" : level === "Low" ? "bg-green-50 dark:bg-green-900/30" : "bg-yellow-50 dark:bg-yellow-900/30"}`}
                             >
                               <span className="text-sm flex-shrink-0">
                                 {levelIcon}
@@ -2128,7 +2206,6 @@ export default function App() {
                                 {title}
                               </span>
                             </div>
-                            {/* Penjelasan */}
                             {r.desc && (
                               <div className="px-4 py-3 bg-white dark:bg-gray-900">
                                 <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">

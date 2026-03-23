@@ -12,18 +12,37 @@ import logging
 router = APIRouter(prefix="/api", tags=["analyze"])
 logger = logging.getLogger(__name__)
 
+
 class AnalyzeRequest(BaseModel):
     lang: Optional[str] = "ID"
 
+
 @router.post("/analyze/{analysis_id}")
-def run_analysis(analysis_id: int, body: AnalyzeRequest = AnalyzeRequest(), db: Session = Depends(get_db)):
+def run_analysis(
+    analysis_id: int,
+    body: AnalyzeRequest = AnalyzeRequest(),
+    db: Session = Depends(get_db),
+):
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
         raise HTTPException(status_code=404, detail="Data tidak ditemukan")
 
-    lang = (body.lang or "ID").upper()  # "EN" atau "ID"
+    lang = (body.lang or "ID").upper()
 
-    # Inisialisasi semua variabel defensif agar tidak ada 'not defined' error
+    # Cek apakah sudah pernah dianalisis dengan bahasa yang sama
+    # Jika sudah ada dan bahasa sama, skip re-analyze (hemat waktu)
+    if analysis.ipo_details:
+        existing = json.loads(analysis.ipo_details)
+        existing_lang = existing.get("lang", "").upper()
+        if existing_lang == lang and analysis.summary:
+            logger.info(f"Analisis id={analysis_id} lang={lang} sudah ada, skip re-analyze")
+            return {
+                "message":      "Analisis sudah ada",
+                "analysis_id":  analysis_id,
+                "company_name": analysis.company_name,
+            }
+
+    # Inisialisasi variabel defensif
     ticker      = ""
     market      = {}
     underwriter = {}
@@ -33,78 +52,67 @@ def run_analysis(analysis_id: int, body: AnalyzeRequest = AnalyzeRequest(), db: 
     overall_risk_reason = ""
 
     try:
-        # ── 1. Analisis prospektus via Gemini ────────────────────────────
+        # ── 1. Analisis prospektus via Gemini ─────────────────────────
         result = analyze_prospectus(analysis.raw_text, lang=lang)
 
         analysis.company_name   = result.get("company_name", analysis.company_name)
         analysis.summary        = result.get("summary", "")
         analysis.financial_data = json.dumps(result.get("financial", {}))
 
-        # ── 2. Ambil overall risk level dari Gemini ───────────────────────
-        overall_risk_level  = result.get("overall_risk_level", "").upper()  # HIGH/MEDIUM/LOW
+        # ── 2. Risk level ──────────────────────────────────────────────
+        overall_risk_level  = result.get("overall_risk_level", "").upper()
         overall_risk_reason = result.get("overall_risk_reason", "")
-
-        # Normalisasi
         if overall_risk_level not in ["HIGH", "MEDIUM", "LOW"]:
             overall_risk_level = "MEDIUM"
 
-        # ── 3. Filter risks — hanya tampilkan yang sesuai overall level ───
+        # ── 3. Risks & Benefits ────────────────────────────────────────
         all_risks = result.get("risks", [])
-        # Risks dari Gemini sudah difilter sesuai level, tapi kita pastikan lagi
-        level_map = {"HIGH": "High", "MEDIUM": "Medium", "LOW": "Low"}
-        target_level = level_map.get(overall_risk_level, "Medium")
-        risks = [r for r in all_risks if str(r.get("level","")).strip().capitalize() == target_level]
-        # Jika filter kosong, pakai semua risks dari Gemini
-        if not risks:
-            risks = all_risks
-
-        benefits    = result.get("benefits", [])
+        # Pakai semua risks dari Gemini (sudah difilter di prompt)
+        risks    = all_risks
+        benefits = result.get("benefits", [])
         underwriter = result.get("underwriter", {})
 
+        # Tambahkan benefit/risk dari underwriter jika relevan
         if underwriter:
             reputation = underwriter.get("reputation", "")
             lead       = underwriter.get("lead", "")
             uw_type    = underwriter.get("type", "")
             others     = underwriter.get("others", [])
             others_str = ", ".join(others) if others else ""
+            rep_lower  = reputation.lower()
 
-            rep_lower = reputation.lower()
-            is_good   = any(w in rep_lower for w in [
-                "baik", "besar", "terpercaya", "terkemuka",
-                "terbesar", "sangat", "ternama", "top"
+            is_good = any(w in rep_lower for w in [
+                "baik", "besar", "terpercaya", "terkemuka", "terbesar",
+                "sangat", "ternama", "top", "reputable", "prominent",
+                "established", "leading", "trusted",
             ])
 
             if is_good:
-                desc = f"IPO ini dijamin oleh {lead}"
-                if others_str:
-                    desc += f" bersama {others_str}"
-                desc += f" ({uw_type}). {reputation}"
-                benefits.append({
-                    "title": "Didukung Penjamin Emisi Terpercaya",
-                    "desc":  desc
-                })
-            else:
-                desc = f"Penjamin emisi {lead} memiliki reputasi yang perlu diperhatikan. {reputation}"
-                risks.append({
-                    "level": "Medium",
-                    "title": "Risiko Reputasi Penjamin Emisi",
-                    "desc":  desc
-                })
+                if lang == "EN":
+                    title = "Backed by Reputable Underwriters"
+                    desc  = f"This IPO is underwritten by {lead}"
+                    if others_str:
+                        desc += f" and {others_str}"
+                    desc += f" ({uw_type}). {reputation}"
+                else:
+                    title = "Didukung Penjamin Emisi Terpercaya"
+                    desc  = f"IPO ini dijamin oleh {lead}"
+                    if others_str:
+                        desc += f" bersama {others_str}"
+                    desc += f" ({uw_type}). {reputation}"
+                benefits.append({"title": title, "desc": desc})
 
         analysis.risks    = json.dumps(risks)
         analysis.benefits = json.dumps(benefits)
 
-        # ── 3. Cari ticker ────────────────────────────────────────────────
+        # ── 4. Ticker ──────────────────────────────────────────────────
         company_name       = result.get("company_name", analysis.company_name)
         ticker_from_gemini = result.get("ticker", "").strip().upper()
 
-        ticker = ""
-        # Validasi ticker dari Gemini: harus 2-6 huruf kapital
-        if ticker_from_gemini and re.match(r'^[A-Z]{2,6}$', ticker_from_gemini):
+        if ticker_from_gemini and re.match(r"^[A-Z]{2,6}$", ticker_from_gemini):
             ticker = ticker_from_gemini
             logger.info(f"Ticker dari Gemini: {ticker}")
         else:
-            # Gemini tidak tahu / format salah — cari via IDX/Yahoo
             try:
                 ticker = get_ticker_from_google(company_name, "")
                 logger.info(f"Ticker dari search: {ticker}")
@@ -112,7 +120,7 @@ def run_analysis(analysis_id: int, body: AnalyzeRequest = AnalyzeRequest(), db: 
                 logger.warning(f"Gagal cari ticker: {e}")
                 ticker = ""
 
-        # ── 4. Ambil harga live dari Google Finance ───────────────────────
+        # ── 5. Harga live ──────────────────────────────────────────────
         market = {}
         if ticker:
             try:
@@ -120,25 +128,27 @@ def run_analysis(analysis_id: int, body: AnalyzeRequest = AnalyzeRequest(), db: 
             except Exception as e:
                 logger.warning(f"Gagal ambil market data: {e}")
 
-        # ── 5. Simpan ipo_details ─────────────────────────────────────────
+        # ── 6. Simpan ipo_details ──────────────────────────────────────
         kpi_data   = result.get("kpi", {})
-        market_cap = market.get("market_cap") or kpi_data.get("market_cap") or result.get("market_cap", "")
+        market_cap = (market.get("market_cap") or
+                      kpi_data.get("market_cap") or
+                      result.get("market_cap", ""))
 
         analysis.ipo_details = json.dumps({
-            "ticker":               ticker or "",
-            "sector":               result.get("sector", ""),
-            "ipo_date":             result.get("ipo_date", ""),
-            "share_price":          result.get("share_price", ""),
-            "total_shares":         result.get("total_shares", ""),
-            "market_cap":           market_cap,
-            "current_price":        market.get("current_price", ""),
-            "shares_outstanding":   market.get("shares_outstanding", ""),
-            "use_of_funds":         result.get("use_of_funds", []),
-            "kpi":                  kpi_data,
-            "underwriter":          underwriter,
-            "overall_risk_level":   overall_risk_level,
-            "overall_risk_reason":  overall_risk_reason,
-            "lang":                 lang,
+            "ticker":              ticker or "",
+            "sector":              result.get("sector", ""),
+            "ipo_date":            result.get("ipo_date", ""),
+            "share_price":         result.get("share_price", ""),
+            "total_shares":        result.get("total_shares", ""),
+            "market_cap":          market_cap,
+            "current_price":       market.get("current_price", ""),
+            "shares_outstanding":  market.get("shares_outstanding", ""),
+            "use_of_funds":        result.get("use_of_funds", []),
+            "kpi":                 kpi_data,
+            "underwriter":         underwriter,
+            "overall_risk_level":  overall_risk_level,
+            "overall_risk_reason": overall_risk_reason,
+            "lang":                lang,
         })
 
         db.commit()
@@ -173,11 +183,10 @@ def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
     lang          = ipo.get("lang", "ID").upper()
     is_en         = lang == "EN"
 
-    # Label risiko mengikuti bahasa
     label_map = {
-        "HIGH":   "High Risk"      if is_en else "Risiko Tinggi",
-        "MEDIUM": "Medium Risk"    if is_en else "Risiko Sedang",
-        "LOW":    "Low Risk"       if is_en else "Risiko Rendah",
+        "HIGH":   "High Risk"    if is_en else "Risiko Tinggi",
+        "MEDIUM": "Medium Risk"  if is_en else "Risiko Sedang",
+        "LOW":    "Low Risk"     if is_en else "Risiko Rendah",
     }
     color_map = {"HIGH": "#EF4444", "MEDIUM": "#F59E0B", "LOW": "#22C55E"}
 
@@ -189,42 +198,42 @@ def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
         risk_level, risk_label, risk_color = _resolve_overall_risk(risks, is_en)
 
     return {
-        "id":                   analysis.id,
-        "company_name":         analysis.company_name,
-        "created_at":           str(analysis.created_at),
-        # Root level — frontend baca langsung dari sini
-        "ticker":               ipo.get("ticker", ""),
-        "sector":               ipo.get("sector", ""),
-        "ipo_date":             ipo.get("ipo_date", ""),
-        "share_price":          ipo.get("share_price", ""),
-        "current_price":        ipo.get("current_price", ""),
-        "total_shares":         ipo.get("total_shares", ""),
-        "shares_outstanding":   ipo.get("shares_outstanding", ""),
-        "market_cap":           ipo.get("market_cap", ""),
-        "summary":              analysis.summary,
-        "financial":            financial,
-        "use_of_funds":         ipo.get("use_of_funds", []),
-        "kpi":                  ipo.get("kpi", {}),
-        "underwriter":          ipo.get("underwriter", {}),
-        "risk_level":           risk_level,
-        "risk_label":           risk_label,
-        "risk_color":           risk_color,
-        "risk_reason":          stored_reason,
-        "risks":                risks,
-        "benefits":             benefits,
-        "ipo_details":          ipo,
+        "id":                  analysis.id,
+        "company_name":        analysis.company_name,
+        "created_at":          str(analysis.created_at),
+        "lang":                lang,
+        "ticker":              ipo.get("ticker", ""),
+        "sector":              ipo.get("sector", ""),
+        "ipo_date":            ipo.get("ipo_date", ""),
+        "share_price":         ipo.get("share_price", ""),
+        "current_price":       ipo.get("current_price", ""),
+        "total_shares":        ipo.get("total_shares", ""),
+        "shares_outstanding":  ipo.get("shares_outstanding", ""),
+        "market_cap":          ipo.get("market_cap", ""),
+        "summary":             analysis.summary,
+        "financial":           financial,
+        "use_of_funds":        ipo.get("use_of_funds", []),
+        "kpi":                 ipo.get("kpi", {}),
+        "underwriter":         ipo.get("underwriter", {}),
+        "risk_level":          risk_level,
+        "risk_label":          risk_label,
+        "risk_color":          risk_color,
+        "risk_reason":         stored_reason,
+        "risks":               risks,
+        "benefits":            benefits,
+        "ipo_details":         ipo,
     }
 
 
-def _resolve_overall_risk(risks: list, is_en: bool = False) -> tuple[str, str, str]:
+def _resolve_overall_risk(risks: list, is_en: bool = False) -> tuple:
     priority = {"high": 3, "medium": 2, "low": 1}
     highest  = 0
     for r in risks:
         lvl     = str(r.get("level", "")).lower()
         highest = max(highest, priority.get(lvl, 0))
     if highest >= 3:
-        return "HIGH",   "High Risk"   if is_en else "Risiko Tinggi", "#EF4444"
+        return "HIGH",   ("High Risk"   if is_en else "Risiko Tinggi"),   "#EF4444"
     elif highest == 2:
-        return "MEDIUM", "Medium Risk" if is_en else "Risiko Sedang", "#F59E0B"
+        return "MEDIUM", ("Medium Risk" if is_en else "Risiko Sedang"),   "#F59E0B"
     else:
-        return "LOW",    "Low Risk"    if is_en else "Risiko Rendah", "#22C55E"
+        return "LOW",    ("Low Risk"    if is_en else "Risiko Rendah"),   "#22C55E"
