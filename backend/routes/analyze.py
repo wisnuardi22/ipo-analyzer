@@ -29,20 +29,6 @@ def run_analysis(
 
     lang = (body.lang or "ID").upper()
 
-    # Cek apakah sudah pernah dianalisis dengan bahasa yang sama
-    # Jika sudah ada dan bahasa sama, skip re-analyze (hemat waktu)
-    if analysis.ipo_details:
-        existing = json.loads(analysis.ipo_details)
-        existing_lang = existing.get("lang", "").upper()
-        if existing_lang == lang and analysis.summary:
-            logger.info(f"Analisis id={analysis_id} lang={lang} sudah ada, skip re-analyze")
-            return {
-                "message":      "Analisis sudah ada",
-                "analysis_id":  analysis_id,
-                "company_name": analysis.company_name,
-            }
-
-    # Inisialisasi variabel defensif
     ticker      = ""
     market      = {}
     underwriter = {}
@@ -52,27 +38,29 @@ def run_analysis(
     overall_risk_reason = ""
 
     try:
-        # ── 1. Analisis prospektus via Gemini ─────────────────────────
         result = analyze_prospectus(analysis.raw_text, lang=lang)
+
+        # DEBUG
+        fin = result.get("financial", {})
+        kpi = result.get("kpi", {})
+        logger.info(f"[DEBUG] lang={lang} company={result.get('company_name','')}")
+        logger.info(f"[DEBUG] years={fin.get('years',[])} currency={fin.get('currency','')}")
+        logger.info(f"[DEBUG] kpi={json.dumps(kpi, ensure_ascii=False)}")
+        logger.info(f"[DEBUG] uof={len(result.get('use_of_funds',[]))} benefits={len(result.get('benefits',[]))}")
 
         analysis.company_name   = result.get("company_name", analysis.company_name)
         analysis.summary        = result.get("summary", "")
-        analysis.financial_data = json.dumps(result.get("financial", {}))
+        analysis.financial_data = json.dumps(fin)
 
-        # ── 2. Risk level ──────────────────────────────────────────────
         overall_risk_level  = result.get("overall_risk_level", "").upper()
         overall_risk_reason = result.get("overall_risk_reason", "")
         if overall_risk_level not in ["HIGH", "MEDIUM", "LOW"]:
             overall_risk_level = "MEDIUM"
 
-        # ── 3. Risks & Benefits ────────────────────────────────────────
-        all_risks = result.get("risks", [])
-        # Pakai semua risks dari Gemini (sudah difilter di prompt)
-        risks    = all_risks
-        benefits = result.get("benefits", [])
+        risks       = result.get("risks", [])
+        benefits    = result.get("benefits", [])
         underwriter = result.get("underwriter", {})
 
-        # Tambahkan benefit/risk dari underwriter jika relevan
         if underwriter:
             reputation = underwriter.get("reputation", "")
             lead       = underwriter.get("lead", "")
@@ -80,32 +68,27 @@ def run_analysis(
             others     = underwriter.get("others", [])
             others_str = ", ".join(others) if others else ""
             rep_lower  = reputation.lower()
-
             is_good = any(w in rep_lower for w in [
                 "baik", "besar", "terpercaya", "terkemuka", "terbesar",
                 "sangat", "ternama", "top", "reputable", "prominent",
                 "established", "leading", "trusted",
             ])
-
             if is_good:
                 if lang == "EN":
                     title = "Backed by Reputable Underwriters"
                     desc  = f"This IPO is underwritten by {lead}"
-                    if others_str:
-                        desc += f" and {others_str}"
+                    if others_str: desc += f" and {others_str}"
                     desc += f" ({uw_type}). {reputation}"
                 else:
                     title = "Didukung Penjamin Emisi Terpercaya"
                     desc  = f"IPO ini dijamin oleh {lead}"
-                    if others_str:
-                        desc += f" bersama {others_str}"
+                    if others_str: desc += f" bersama {others_str}"
                     desc += f" ({uw_type}). {reputation}"
                 benefits.append({"title": title, "desc": desc})
 
         analysis.risks    = json.dumps(risks)
         analysis.benefits = json.dumps(benefits)
 
-        # ── 4. Ticker ──────────────────────────────────────────────────
         company_name       = result.get("company_name", analysis.company_name)
         ticker_from_gemini = result.get("ticker", "").strip().upper()
 
@@ -120,7 +103,6 @@ def run_analysis(
                 logger.warning(f"Gagal cari ticker: {e}")
                 ticker = ""
 
-        # ── 5. Harga live ──────────────────────────────────────────────
         market = {}
         if ticker:
             try:
@@ -128,7 +110,6 @@ def run_analysis(
             except Exception as e:
                 logger.warning(f"Gagal ambil market data: {e}")
 
-        # ── 6. Simpan ipo_details ──────────────────────────────────────
         kpi_data   = result.get("kpi", {})
         market_cap = (market.get("market_cap") or
                       kpi_data.get("market_cap") or
@@ -173,10 +154,15 @@ def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
     if not analysis:
         raise HTTPException(status_code=404, detail="Data tidak ditemukan")
 
-    ipo       = json.loads(analysis.ipo_details)    if analysis.ipo_details    else {}
-    financial = json.loads(analysis.financial_data) if analysis.financial_data else {}
-    risks     = json.loads(analysis.risks)          if analysis.risks          else []
-    benefits  = json.loads(analysis.benefits)       if analysis.benefits       else []
+    # DEBUG log setelah query
+    fin_stored = json.loads(analysis.financial_data) if analysis.financial_data else {}
+    ipo_stored = json.loads(analysis.ipo_details) if analysis.ipo_details else {}
+    logger.info(f"[GET] id={analysis_id} years={fin_stored.get('years',[])} kpi={ipo_stored.get('kpi',{})}")
+
+    ipo       = ipo_stored
+    financial = fin_stored
+    risks     = json.loads(analysis.risks)    if analysis.risks    else []
+    benefits  = json.loads(analysis.benefits) if analysis.benefits else []
 
     stored_level  = ipo.get("overall_risk_level", "")
     stored_reason = ipo.get("overall_risk_reason", "")
@@ -184,9 +170,9 @@ def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
     is_en         = lang == "EN"
 
     label_map = {
-        "HIGH":   "High Risk"    if is_en else "Risiko Tinggi",
-        "MEDIUM": "Medium Risk"  if is_en else "Risiko Sedang",
-        "LOW":    "Low Risk"     if is_en else "Risiko Rendah",
+        "HIGH":   "High Risk"   if is_en else "Risiko Tinggi",
+        "MEDIUM": "Medium Risk" if is_en else "Risiko Sedang",
+        "LOW":    "Low Risk"    if is_en else "Risiko Rendah",
     }
     color_map = {"HIGH": "#EF4444", "MEDIUM": "#F59E0B", "LOW": "#22C55E"}
 
