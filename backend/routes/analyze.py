@@ -61,6 +61,7 @@ def run_analysis(
         benefits    = result.get("benefits", [])
         underwriter = result.get("underwriter", {})
 
+        # Tambahkan benefit dari underwriter jika reputasi baik
         if underwriter:
             reputation = underwriter.get("reputation", "")
             lead       = underwriter.get("lead", "")
@@ -71,7 +72,7 @@ def run_analysis(
             is_good = any(w in rep_lower for w in [
                 "baik", "besar", "terpercaya", "terkemuka", "terbesar",
                 "sangat", "ternama", "top", "reputable", "prominent",
-                "established", "leading", "trusted",
+                "established", "leading", "trusted", "experienced",
             ])
             if is_good:
                 if lang == "EN":
@@ -154,7 +155,6 @@ def get_analysis(analysis_id: int, db: Session = Depends(get_db)):
     if not analysis:
         raise HTTPException(status_code=404, detail="Data tidak ditemukan")
 
-    # DEBUG log setelah query
     fin_stored = json.loads(analysis.financial_data) if analysis.financial_data else {}
     ipo_stored = json.loads(analysis.ipo_details) if analysis.ipo_details else {}
     logger.info(f"[GET] id={analysis_id} years={fin_stored.get('years',[])} kpi={ipo_stored.get('kpi',{})}")
