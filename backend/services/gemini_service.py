@@ -1,11 +1,15 @@
 """
 services/gemini_service.py
 --------------------------
-Pipeline analisis prospektus IPO:
-  Step 1 — LLM ekstrak data mentah keuangan (angka per tahun)
-  Step 2 — LLM hitung KPI + Financial Highlights langsung (prompt Gemini Pro)
-  Step 3 — LLM analisis kualitatif (summary, risiko, benefit, use of funds) EN/ID
-  Step 4 — Ticker search fallback
+Analisis prospektus IPO Indonesia secara komprehensif.
+Pipeline:
+  1. Detect metadata dokumen (currency, unit, fx rate)
+  2. LLM multi-chunk — ekstrak data keuangan mentah
+  3. Python — normalisasi + hitung semua KPI
+  4. LLM — analisis kualitatif (summary, risiko, benefit, use of funds)
+  5. Fallback ticker search jika tidak ada di dokumen
+
+Output mendukung lang="ID" (Bahasa Indonesia) dan lang="EN" (English).
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ MODEL = "gemini/gemini-2.5-flash"
 # ══════════════════════════════════════════════════════════════════════
 
 def parse_num(raw: Any) -> Optional[float]:
+    """Parse angka format Indonesia/Inggris, termasuk (xxx) = negatif."""
     if raw is None:
         return None
     if isinstance(raw, (int, float)):
@@ -65,6 +70,34 @@ def parse_num(raw: Any) -> Optional[float]:
         return -val if neg else val
     except Exception:
         return None
+
+
+def apply_unit(val: Any, unit: str) -> Optional[float]:
+    v = parse_num(val)
+    if v is None:
+        return None
+    return v * {"jutaan": 1_000_000, "ribuan": 1_000,
+                "miliar": 1_000_000_000, "triliun": 1_000_000_000_000}.get(unit.lower(), 1)
+
+
+def safe_div(a: Any, b: Any) -> Optional[float]:
+    try:
+        af, bf = parse_num(a), parse_num(b)
+        return af / bf if af is not None and bf else None
+    except Exception:
+        return None
+
+
+def to_pct(val: Any) -> Optional[float]:
+    v = parse_num(val)
+    return round(v * 100, 2) if v is not None and not math.isnan(v) else None
+
+
+def calc_growth(cur: Any, prev: Any) -> Optional[float]:
+    c, p = parse_num(cur), parse_num(prev)
+    if c is None or p is None or p == 0:
+        return None
+    return round((c - p) / abs(p) * 100, 2)
 
 
 def fmt_idr(value: float) -> str:
@@ -110,8 +143,18 @@ def detect_fx_rate(text: str) -> Optional[float]:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 3. JSON UTILITIES
+# 3. LLM FINANCIAL EXTRACTION (MULTI-CHUNK)
 # ══════════════════════════════════════════════════════════════════════
+
+def _chunk_text(text: str, max_len: int = 18000, overlap: int = 800) -> List[str]:
+    if len(text) <= max_len:
+        return [text]
+    chunks, i = [], 0
+    while i < len(text):
+        chunks.append(text[i: i + max_len])
+        i += max_len - overlap
+    return chunks
+
 
 def _safe_json(raw: str) -> Optional[dict]:
     raw = raw.strip()
@@ -133,53 +176,54 @@ def _safe_json(raw: str) -> Optional[dict]:
     return None
 
 
-def _chunk_text(text: str, max_len: int = 60000) -> List[str]:
-    if len(text) <= max_len:
-        return [text]
-    chunks, i = [], 0
-    overlap = 2000
-    while i < len(text):
-        chunks.append(text[i: i + max_len])
-        i += max_len - overlap
-    return chunks
-
-
 _FIN_KEYWORDS = [
-    "ikhtisar data keuangan", "ringkasan data keuangan", "data keuangan penting",
-    "laporan laba rugi", "posisi keuangan", "neraca konsolidasian",
-    "laba kotor", "laba usaha", "laba bersih", "pendapatan usaha",
-    "pendapatan bersih", "penjualan bersih", "31 desember",
-    "rasio keuangan", "rasio penting",
+    "laporan laba rugi", "ikhtisar data keuangan", "data keuangan penting",
+    "ringkasan keuangan", "informasi keuangan", "laba kotor", "laba usaha",
+    "laba bersih", "pendapatan usaha", "pendapatan bersih", "penjualan bersih",
+    "posisi keuangan", "neraca", "ekuitas", "liabilitas",
     "gross profit", "net revenue", "operating profit", "net income",
     "profit or loss", "statement of profit", "balance sheet",
     "selected financial", "financial highlights",
 ]
 
+_FIN_SYSTEM = """Kamu adalah akuntan senior Indonesia. Ekstrak data keuangan dari potongan prospektus IPO.
+Output HANYA JSON murni — tanpa teks lain, tanpa markdown.
 
-# ══════════════════════════════════════════════════════════════════════
-# 4. STEP 1 — LLM EKSTRAK DATA MENTAH (angka per tahun + saham + harga)
-# ══════════════════════════════════════════════════════════════════════
+INSTRUKSI EKSTRAKSI:
+1. Cari tabel laporan keuangan dengan judul seperti:
+   "LAPORAN LABA RUGI", "DATA KEUANGAN PENTING", "IKHTISAR DATA KEUANGAN",
+   "SELECTED FINANCIAL DATA", "CONSOLIDATED STATEMENTS OF PROFIT OR LOSS",
+   "RINGKASAN KEUANGAN", "INFORMASI KEUANGAN RINGKAS"
 
-_RAW_SYSTEM = """Kamu adalah akuntan senior Indonesia. Ekstrak data keuangan mentah dari teks prospektus IPO.
+2. Baca header kolom tabel — itulah tahun-tahun tersedia (contoh: 2021, 2022, 2023, 2024).
+   Masukkan SEMUA tahun ke "tahun_tersedia" dan buat entry per tahun di "data_per_tahun".
 
-CARI di bagian:
-- "IKHTISAR DATA KEUANGAN PENTING" / "RINGKASAN DATA KEUANGAN" / "DATA KEUANGAN PENTING"
-- "LAPORAN LABA RUGI" / "CONSOLIDATED STATEMENTS OF PROFIT OR LOSS"
-- "LAPORAN POSISI KEUANGAN" / "NERACA KONSOLIDASIAN" / "BALANCE SHEET"
-- "SELECTED FINANCIAL DATA" / "FINANCIAL HIGHLIGHTS"
-- Tabel yang menampilkan data per 31 Desember XXXX
+3. Untuk setiap tahun, ekstrak:
+   - pendapatan   : Total Pendapatan / Revenue / Penjualan Bersih / Net Revenue
+   - laba_kotor   : Laba Kotor / Gross Profit
+   - laba_usaha   : Laba / Rugi Usaha / Operating Profit/Loss (bisa negatif)
+   - laba_bersih  : Laba / Rugi Bersih / Net Profit/Loss (bisa negatif)
+   - depresiasi   : Depresiasi & Amortisasi (null jika tidak ada)
 
-ATURAN:
-- Baca header kolom tabel → itulah tahun-tahun yang tersedia
-- Ambil data tahun buku PENUH (31 Desember) saja, abaikan interim
-- Tulis angka PERSIS dari dokumen, jangan ubah satuan
-- Angka dalam kurung (1.234) = negatif → tulis -1234
-- satuan: "jutaan" / "ribuan" / "miliar" / "full" (lihat header tabel)
-- total_ekuitas, total_liabilitas, total_aset: dari tahun TERAKHIR di neraca
-- total_saham_beredar: jumlah saham SETELAH IPO (halaman depan/ringkasan)
-- harga_penawaran: harga per saham tanpa "Rp" (halaman ringkasan penawaran)
+4. Catat satuan dari header tabel:
+   "dalam jutaan Rupiah" -> satuan="jutaan"
+   "dalam ribuan" -> satuan="ribuan"
+   "dalam miliar" -> satuan="miliar"
+   Tidak ada keterangan -> satuan="full"
 
-OUTPUT JSON MURNI:
+5. Tulis angka PERSIS seperti di dokumen — JANGAN konversi satuan.
+   Angka negatif dalam kurung (1.234) -> tulis -1234.
+
+6. Dari neraca/posisi keuangan, ambil tahun TERAKHIR:
+   - total_ekuitas, total_liabilitas, total_aset
+
+7. Cari:
+   - total_saham_beredar: jumlah saham beredar SETELAH IPO
+   - harga_penawaran: harga per saham (angka saja, tanpa "Rp")
+
+8. Jika potongan ini tidak ada data keuangan -> isi null/[]
+
+OUTPUT JSON WAJIB PERSIS FORMAT INI:
 {
   "satuan": "jutaan",
   "mata_uang": "IDR",
@@ -197,46 +241,64 @@ OUTPUT JSON MURNI:
 }"""
 
 
-def llm_extract_raw(text: str) -> Dict[str, Any]:
-    """Step 1: Ekstrak angka mentah dari prospektus."""
-    empty: Dict[str, Any] = {
-        "satuan": None, "mata_uang": None, "tahun_tersedia": [], "data_per_tahun": [],
+def llm_extract_financials(text: str) -> Dict[str, Any]:
+    """Multi-chunk LLM extraction untuk data keuangan."""
+    merged: Dict[str, Any] = {
+        "satuan": None, "mata_uang": None,
+        "tahun_tersedia": [], "data_per_tahun": [],
         "total_ekuitas": None, "total_liabilitas": None, "total_aset": None,
         "total_saham_beredar": None, "harga_penawaran": None,
     }
 
-    def _call(chunk: str) -> dict:
+    all_chunks = _chunk_text(text, max_len=18000, overlap=800)
+
+    priority, others = [], []
+    for c in all_chunks:
+        cl = c.lower()
+        if "daftar isi" in cl and cl.count("halaman") > 5:
+            continue
+        if any(k in cl for k in _FIN_KEYWORDS):
+            priority.append(c)
+        else:
+            others.append(c)
+
+    mid = len(others) // 2
+    selected = list(priority[:8])
+    for c in others[max(0, mid - 1): mid + 2]:
+        if c not in selected:
+            selected.append(c)
+    if all_chunks and all_chunks[0] not in selected:
+        selected.insert(0, all_chunks[0])
+    if len(all_chunks) > 1 and all_chunks[-1] not in selected:
+        selected.append(all_chunks[-1])
+
+    selected = selected[:10]
+
+    for chunk in selected:
         try:
             resp = client.chat.completions.create(
-                model=MODEL, temperature=0.0, max_tokens=4000,
+                model=MODEL, temperature=0.01, max_tokens=4000,
                 messages=[
-                    {"role": "system", "content": _RAW_SYSTEM},
+                    {"role": "system", "content": _FIN_SYSTEM},
                     {"role": "user", "content": f"DOKUMEN:\n{chunk}"},
                 ],
             )
-            return _safe_json(resp.choices[0].message.content) or {}
+            part = _safe_json(resp.choices[0].message.content) or {}
         except Exception as e:
-            logger.warning(f"LLM raw extract error: {e}")
-            return {}
+            logger.warning(f"LLM financial chunk error: {e}")
+            part = {}
 
-    def _has_data(r: dict) -> bool:
-        for yr in r.get("data_per_tahun", []):
-            for k in ("pendapatan", "laba_kotor", "laba_usaha", "laba_bersih"):
-                if yr.get(k) is not None:
-                    return True
-        return (r.get("total_saham_beredar") is not None and
-                r.get("harga_penawaran") is not None)
-
-    def _merge(base: dict, part: dict) -> dict:
         for k in ("satuan", "mata_uang"):
-            if not base[k] and part.get(k):
-                base[k] = part[k]
+            if not merged[k] and part.get(k):
+                merged[k] = part[k]
+
         if part.get("tahun_tersedia"):
-            base["tahun_tersedia"] = sorted(
-                set(base["tahun_tersedia"]) | set(str(y) for y in part["tahun_tersedia"])
+            merged["tahun_tersedia"] = sorted(
+                set(merged["tahun_tersedia"]) | set(str(y) for y in part["tahun_tersedia"])
             )
+
         if part.get("data_per_tahun"):
-            m_dict = {str(d.get("tahun", "")).strip(): d for d in base["data_per_tahun"]}
+            m_dict = {str(d.get("tahun", "")).strip(): d for d in merged["data_per_tahun"]}
             for d in part["data_per_tahun"]:
                 y = str(d.get("tahun", "")).strip()
                 if not y:
@@ -248,231 +310,116 @@ def llm_extract_raw(text: str) -> Dict[str, Any]:
                             m_dict[y][k] = v
                 else:
                     m_dict[y] = d
-            base["data_per_tahun"] = [m_dict[k] for k in sorted(m_dict.keys())]
+            merged["data_per_tahun"] = [m_dict[k] for k in sorted(m_dict.keys())]
+
         for k in ("total_ekuitas", "total_liabilitas", "total_aset",
                   "total_saham_beredar", "harga_penawaran"):
             v = part.get(k)
-            if base.get(k) is None and v is not None and str(v).strip() not in ("null", ""):
-                base[k] = v
-        return base
+            if merged.get(k) is None and v is not None and str(v).strip() not in ("null", ""):
+                merged[k] = v
 
-    merged = dict(empty)
-
-    # Fase 1: Halaman depan (saham + harga biasanya di sini)
-    front = _call(text[:6000])
-    merged = _merge(merged, front)
-
-    # Fase 2: Chunk scan prioritas keyword keuangan
-    all_chunks = _chunk_text(text, max_len=60000)
-    priority = []
-    for c in all_chunks:
-        cl = c.lower()
-        if "daftar isi" in cl and cl.count("halaman") > 5:
-            continue
-        if any(k in cl for k in _FIN_KEYWORDS):
-            priority.append(c)
-    for idx in [0, len(all_chunks)//4, len(all_chunks)//2, -1]:
-        try:
-            c = all_chunks[idx]
-            if c not in priority:
-                priority.append(c)
-        except IndexError:
-            pass
-
-    for chunk in priority[:8]:
-        part = _call(chunk)
-        merged = _merge(merged, part)
-        if _has_data(merged):
-            break
-
-    logger.info(f"[RAW] tahun={merged.get('tahun_tersedia')}, "
-                f"saham={merged.get('total_saham_beredar')}, "
-                f"harga={merged.get('harga_penawaran')}, "
-                f"ekuitas={merged.get('total_ekuitas')}")
     return merged
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 5. STEP 2 — LLM HITUNG KPI + FINANCIAL HIGHLIGHTS (Gemini Pro prompt)
+# 4. NORMALIZE + COMPUTE ALL KPIs
 # ══════════════════════════════════════════════════════════════════════
 
-_KPI_SYSTEM = """Anda adalah seorang analis keuangan senior dan spesialis pembacaan dokumen prospektus IPO.
-Tugas Anda adalah mengekstrak data keuangan historis tahunan (per 31 Desember) dari teks prospektus
-dan menghitung metrik KPI serta Financial Highlights.
+def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict, Dict]:
+    unit     = (fin_raw.get("satuan") or "full").lower()
+    currency = (fin_raw.get("mata_uang") or "IDR").upper()
 
-ATURAN EKSTRAKSI & PERHITUNGAN:
+    years_data = []
+    for d in fin_raw.get("data_per_tahun", []):
+        nd = dict(d)
+        for k in ("pendapatan", "laba_kotor", "laba_usaha", "laba_bersih", "depresiasi"):
+            nd[k] = apply_unit(nd.get(k), unit) if nd.get(k) is not None else None
+        years_data.append(nd)
+    years_data.sort(key=lambda x: str(x.get("tahun", "")))
 
-1. DETEKSI PERIODE DINAMIS: Identifikasi semua tahun buku penuh (31 Desember) yang tersedia.
-   Abaikan data interim (31 Mei, 30 September, dll).
+    ekuitas    = apply_unit(fin_raw.get("total_ekuitas"), unit)
+    liabilitas = apply_unit(fin_raw.get("total_liabilitas"), unit)
+    saham      = parse_num(fin_raw.get("total_saham_beredar"))
+    harga      = parse_num(fin_raw.get("harga_penawaran"))
+    harga_idr  = harga * fx_rate if (harga and currency == "USD" and fx_rate) else harga
 
-2. PRIORITAS: Cari bagian "Rasio Keuangan" atau "Rasio Penting" terlebih dahulu.
-   Jika metrik sudah dihitung oleh penerbit, GUNAKAN angka tersebut langsung.
+    revenue_growth, gross_margin, op_margin, ebitda_margin, net_margin = [], [], [], [], []
+    prev_rev = None
+    for yr in years_data:
+        y   = str(yr.get("tahun", ""))
+        rev = yr.get("pendapatan")
+        gp  = yr.get("laba_kotor")
+        op  = yr.get("laba_usaha")
+        net = yr.get("laba_bersih")
+        dep = yr.get("depresiasi")
 
-3. KALKULASI (jika tidak tersedia di dokumen, hitung dengan rumus ini):
-   - ROE (%) = (Laba Tahun Berjalan / Total Ekuitas) × 100
-   - D/E Ratio = Total Liabilitas / Total Ekuitas
-   - Revenue Growth (%) = ((Pendapatan T - Pendapatan T-1) / Pendapatan T-1) × 100
-   - Gross Margin (%) = (Laba Kotor / Pendapatan) × 100
-   - Operating Margin (%) = (Laba Usaha / Pendapatan) × 100
-     → Jika tidak ada Laba Usaha, pakai Laba Sebelum Pajak sebagai proksi
-   - EBITDA Margin (%) = ((Laba Usaha + Depresiasi & Amortisasi) / Pendapatan) × 100
-   - EPS = Laba Bersih Tahun Terakhir / Total Saham Beredar Setelah IPO
-   - P/E Ratio = Harga Penawaran IPO / EPS
-   - P/B Ratio = Harga Penawaran IPO / (Total Ekuitas / Total Saham Beredar)
+        revenue_growth.append({"year": y, "value": 0.0 if prev_rev is None else calc_growth(rev, prev_rev)})
+        prev_rev = rev
+        gross_margin.append({"year": y, "value": to_pct(safe_div(gp, rev))})
+        op_margin.append({"year": y, "value": to_pct(safe_div(op, rev))})
+        ebitda_margin.append({
+            "year": y,
+            "value": to_pct(safe_div(float(op) + float(dep), rev))
+            if (dep is not None and op is not None and rev) else None
+        })
+        net_margin.append({"year": y, "value": to_pct(safe_div(net, rev))})
 
-4. DATA TIDAK TERSEDIA: Kembalikan "N/A" (string) jika komponen tidak ditemukan.
-
-5. FORMAT:
-   - Key JSON menggunakan tahun aktual: "2022", "2023", "2024"
-   - Nilai numerik: angka desimal, titik sebagai pemisah, maksimal 2 desimal
-   - JANGAN sertakan simbol "%" atau "x" pada value numerik
-   - pe_ratio, pb_ratio, eps: nilai untuk tahun TERAKHIR saja (bukan per tahun)
-
-OUTPUT: JSON murni tanpa markdown, tanpa teks penjelasan."""
-
-_KPI_SCHEMA = """{
-  "kpi": {
-    "pe_ratio": "N/A",
-    "pb_ratio": "N/A",
-    "eps": "N/A",
-    "roe_percent": {"YYYY": 0.00},
-    "de_ratio": {"YYYY": 0.00}
-  },
-  "financial_highlights": {
-    "revenue_growth_percent": {"YYYY": 0.00},
-    "gross_margin_percent": {"YYYY": 0.00},
-    "operating_margin_percent": {"YYYY": 0.00},
-    "ebitda_margin_percent": {"YYYY": 0.00},
-    "net_profit_margin_percent": {"YYYY": 0.00}
-  }
-}"""
-
-
-def llm_compute_kpi(text: str, raw: Dict[str, Any]) -> Tuple[Dict, Dict]:
-    """
-    Step 2: LLM hitung KPI dan Financial Highlights dari teks prospektus.
-    raw digunakan sebagai context tambahan.
-    """
-    # Beri konteks data yang sudah diekstrak ke LLM
-    context = f"""DATA YANG SUDAH DIEKSTRAK SISTEM:
-Satuan: {raw.get('satuan', 'full')}
-Mata Uang: {raw.get('mata_uang', 'IDR')}
-Total Saham Beredar (post-IPO): {raw.get('total_saham_beredar')}
-Harga Penawaran: {raw.get('harga_penawaran')}
-Total Ekuitas (tahun terakhir): {raw.get('total_ekuitas')}
-Total Liabilitas (tahun terakhir): {raw.get('total_liabilitas')}
-
-Data Per Tahun:
-{json.dumps(raw.get('data_per_tahun', []), ensure_ascii=False)}
-
-Gunakan data di atas sebagai panduan, tapi VERIFIKASI dan LENGKAPI dengan membaca langsung dari dokumen prospektus di bawah."""
-
-    system_msg = _KPI_SYSTEM + f"\n\nFORMAT OUTPUT WAJIB:\n{_KPI_SCHEMA}"
+    kpi = {"pe": "N/A", "pb": "N/A", "roe": "N/A", "der": "N/A", "eps": "N/A", "market_cap": "N/A"}
+    laba_last = years_data[-1].get("laba_bersih") if years_data else None
 
     try:
-        resp = client.chat.completions.create(
-            model=MODEL, temperature=0.0, max_tokens=3000,
-            messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": f"{context}\n\nDOKUMEN PROSPEKTUS:\n{text[:350000]}"},
-            ],
-        )
-        result = _safe_json(resp.choices[0].message.content)
-        if not result:
-            raise ValueError("Empty response")
-    except Exception as e:
-        logger.warning(f"LLM KPI compute error: {e}")
-        result = {}
+        if saham and laba_last and saham > 0:
+            eps_val = laba_last / saham
+            kpi["eps"] = f"Rp {eps_val:,.2f}".replace(",", ".") if currency == "IDR" else f"{currency} {eps_val:.4f}"
+            if harga_idr and eps_val > 0:
+                kpi["pe"] = f"{harga_idr / eps_val:.1f}x"
+            elif harga_idr and eps_val < 0:
+                kpi["pe"] = "N/A (Rugi)"
+    except Exception:
+        pass
 
-    kpi_raw  = result.get("kpi", {})
-    fin_raw  = result.get("financial_highlights", {})
-    currency = (raw.get("mata_uang") or "IDR").upper()
-    unit     = (raw.get("satuan") or "full").lower()
+    try:
+        if ekuitas and saham and saham > 0 and harga_idr and ekuitas > 0:
+            bvps = ekuitas / saham
+            if bvps > 0:
+                kpi["pb"] = f"{harga_idr / bvps:.2f}x"
+    except Exception:
+        pass
 
-    # ── Format KPI untuk frontend ──
-    def _apply_unit(val):
-        v = parse_num(val)
-        if v is None:
-            return None
-        multipliers = {"jutaan": 1_000_000, "ribuan": 1_000,
-                       "miliar": 1_000_000_000, "triliun": 1_000_000_000_000}
-        return v * multipliers.get(unit, 1)
+    try:
+        if ekuitas and laba_last and ekuitas > 0:
+            kpi["roe"] = f"{laba_last / ekuitas * 100:.1f}%"
+    except Exception:
+        pass
 
-    def _fmt_kpi_val(val, suffix="") -> str:
-        if val is None or str(val).upper() == "N/A":
-            return "N/A"
-        v = parse_num(val)
-        if v is None:
-            return "N/A"
-        return f"{v:.2f}{suffix}"
+    try:
+        if ekuitas and liabilitas and ekuitas > 0:
+            kpi["der"] = f"{liabilitas / ekuitas:.2f}x"
+    except Exception:
+        pass
 
-    # EPS — format dengan currency
-    eps_raw = kpi_raw.get("eps")
-    if eps_raw and str(eps_raw).upper() != "N/A":
-        eps_v = parse_num(eps_raw)
-        if eps_v is not None:
-            eps_v_real = _apply_unit(eps_v) if unit != "full" else eps_v
-            eps_str = f"Rp {eps_v_real:,.2f}".replace(",", ".") if currency == "IDR" else f"{currency} {eps_v_real:.4f}"
-        else:
-            eps_str = "N/A"
-    else:
-        eps_str = "N/A"
-
-    # Market cap dari raw data
-    market_cap_str = "N/A"
-    saham = parse_num(raw.get("total_saham_beredar"))
-    harga = parse_num(raw.get("harga_penawaran"))
-    if saham and harga and saham > 0 and harga > 0:
-        mc = saham * harga
-        market_cap_str = fmt_idr(mc)
-
-    kpi = {
-        "pe":         _fmt_kpi_val(kpi_raw.get("pe_ratio"), "x"),
-        "pb":         _fmt_kpi_val(kpi_raw.get("pb_ratio"), "x"),
-        "roe":        _fmt_kpi_val(_last_val(kpi_raw.get("roe_percent")), "%"),
-        "der":        _fmt_kpi_val(_last_val(kpi_raw.get("de_ratio")), "x"),
-        "eps":        eps_str,
-        "market_cap": market_cap_str,
-    }
-
-    # ── Format Financial Highlights untuk chart ──
-    def _to_series(d: Any) -> Optional[List[Dict]]:
-        """Convert dict {year: val} ke [{year, value}] untuk Recharts."""
-        if not d or not isinstance(d, dict):
-            return None
-        series = []
-        for yr, val in sorted(d.items()):
-            v = parse_num(val)
-            series.append({"year": str(yr), "value": v})
-        return series if series else None
+    try:
+        if saham and harga and saham > 0 and harga > 0:
+            mc = saham * (harga_idr if harga_idr else harga)
+            kpi["market_cap"] = fmt_idr(mc)
+    except Exception:
+        pass
 
     financial = {
         "currency":          currency,
-        "years":             sorted(list(fin_raw.get("revenue_growth_percent", {}).keys())),
-        "revenue_growth":    _to_series(fin_raw.get("revenue_growth_percent")),
-        "gross_margin":      _to_series(fin_raw.get("gross_margin_percent")),
-        "operating_margin":  _to_series(fin_raw.get("operating_margin_percent")),
-        "ebitda_margin":     _to_series(fin_raw.get("ebitda_margin_percent")),
-        "net_profit_margin": _to_series(fin_raw.get("net_profit_margin_percent")),
-        # Simpan raw juga untuk absolute data
-        "absolute_data":     raw.get("data_per_tahun", []),
+        "years":             [str(d.get("tahun", "")) for d in years_data],
+        "absolute_data":     years_data,
+        "revenue_growth":    revenue_growth or None,
+        "gross_margin":      gross_margin or None,
+        "operating_margin":  op_margin or None,
+        "ebitda_margin":     ebitda_margin or None,
+        "net_profit_margin": net_margin or None,
     }
-
-    logger.info(f"[KPI] {kpi}")
-    logger.info(f"[FIN] years={financial['years']}")
     return financial, kpi
 
 
-def _last_val(d: Any) -> Optional[float]:
-    """Ambil nilai tahun terakhir dari dict {year: val}."""
-    if not d or not isinstance(d, dict):
-        return None
-    last_key = sorted(d.keys())[-1] if d else None
-    return parse_num(d[last_key]) if last_key else None
-
-
 # ══════════════════════════════════════════════════════════════════════
-# 6. STEP 3 — LLM ANALISIS KUALITATIF (EN/ID)
+# 5. LLM QUALITATIVE ANALYSIS
 # ══════════════════════════════════════════════════════════════════════
 
 def llm_qualitative(text: str, kpi: Dict, financial: Dict, lang: str = "ID") -> Dict:
@@ -480,9 +427,15 @@ def llm_qualitative(text: str, kpi: Dict, financial: Dict, lang: str = "ID") -> 
     currency = financial.get("currency", "IDR")
     years    = financial.get("years", [])
 
-    # Semua string bergantung bahasa di-evaluate di Python dulu
+    lang_rule = (
+        "OUTPUT LANGUAGE: Write ALL text fields in ENGLISH. "
+        "company_name stays as original from document."
+    ) if is_en else (
+        "BAHASA OUTPUT: Tulis SEMUA field teks dalam Bahasa Indonesia. "
+        "company_name tetap asli dari dokumen."
+    )
+
     if is_en:
-        lang_rule        = "CRITICAL: ALL output text fields MUST be in ENGLISH ONLY. No Bahasa Indonesia."
         sector_hint      = "Specific business sector in English (e.g. Coffee & F&B, Gold Mining, Banking)"
         summary_hint     = "3 PARAGRAPHS IN ENGLISH separated by \\n\\n. P1: Company profile with numbers. P2: IPO details. P3: Financial condition and outlook."
         category_hint    = "Category name in English"
@@ -497,7 +450,6 @@ def llm_qualitative(text: str, kpi: Dict, financial: Dict, lang: str = "ID") -> 
         rule_risk = 'Fill 4-5 specific risks from "Risk Factors". level = "High", "Medium", or "Low".'
         rule_ben  = 'Fill 4-6 specific competitive advantages. Find in "Competitive Advantages" or front page.'
     else:
-        lang_rule        = "WAJIB: SEMUA field teks output dalam BAHASA INDONESIA. Tidak boleh ada kata Inggris kecuali istilah teknis."
         sector_hint      = "Sektor bisnis spesifik (misal: Kopi & F&B, Pertambangan Emas, Perbankan)"
         summary_hint     = "3 PARAGRAF BAHASA INDONESIA dipisah \\n\\n. P1: Profil perusahaan dengan angka. P2: Detail IPO. P3: Kondisi keuangan dan prospek."
         category_hint    = "Nama kategori dalam Bahasa Indonesia"
@@ -570,6 +522,7 @@ ATURAN:
         result = _safe_json(raw)
         if result:
             return result
+
         fixed = re.sub(r",\s*([}\]])", r"\1", raw)
         s, e  = fixed.find("{"), fixed.rfind("}") + 1
         if s != -1 and e > s:
@@ -578,22 +531,30 @@ ATURAN:
                     return json.loads(fixed[s:end])
                 except Exception:
                     pass
-        raise ValueError(f"JSON parse failed: {raw[:200]}")
+
+        raise ValueError(f"JSON parse failed: {raw[:300]}")
+
     except Exception as e:
         logger.error(f"LLM qualitative error: {e}")
-        raise ValueError(f"Gagal analisis kualitatif: {e}")
+        raise ValueError(f"Gagal memproses analisis kualitatif: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 7. TICKER SEARCH FALLBACK
+# 6. TICKER SEARCH FALLBACK
 # ══════════════════════════════════════════════════════════════════════
 
 def search_ticker_by_name(company_name: str) -> str:
     import requests
-    HEADERS = {"User-Agent": "Mozilla/5.0 AppleWebKit/537.36", "Accept": "application/json"}
+
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+    }
     TIMEOUT = 10
-    EXCLUDE = {"PT", "TBK", "IDX", "BEI", "OJK", "IDR", "USD", "IPO",
-               "ROE", "ROA", "DER", "EPS", "CEO", "CFO", "GDP", "EBITDA"}
+    EXCLUDE = {
+        "PT", "TBK", "IDX", "BEI", "OJK", "IDR", "USD", "IPO",
+        "ROE", "ROA", "DER", "EPS", "CEO", "CFO", "GDP", "EBITDA",
+    }
 
     def clean(name: str) -> str:
         name = re.sub(r"\bPT\.?\s*", "", name, flags=re.I)
@@ -604,11 +565,11 @@ def search_ticker_by_name(company_name: str) -> str:
     if not cleaned:
         return ""
 
-    # Yahoo Finance
     try:
         resp = requests.get(
             "https://query2.finance.yahoo.com/v1/finance/search",
-            params={"q": cleaned, "lang": "id", "region": "ID", "quotesCount": 10, "newsCount": 0},
+            params={"q": cleaned, "lang": "id", "region": "ID",
+                    "quotesCount": 10, "newsCount": 0},
             headers=HEADERS, timeout=TIMEOUT,
         )
         for q in resp.json().get("quotes", []):
@@ -620,9 +581,8 @@ def search_ticker_by_name(company_name: str) -> str:
                     logger.info(f"Ticker Yahoo: {t}")
                     return t
     except Exception as e:
-        logger.warning(f"Yahoo: {e}")
+        logger.warning(f"Yahoo ticker search: {e}")
 
-    # IDX API
     try:
         resp = requests.get(
             "https://idx.co.id/umum/GetStockList/",
@@ -637,64 +597,64 @@ def search_ticker_by_name(company_name: str) -> str:
                 logger.info(f"Ticker IDX: {t}")
                 return t
     except Exception as e:
-        logger.warning(f"IDX: {e}")
+        logger.warning(f"IDX ticker search: {e}")
 
-    # Stooq
     try:
         q    = cleaned.lower().replace(" ", "+")
-        resp = requests.get(f"https://stooq.com/q/?s={q}.jk", headers=HEADERS, timeout=TIMEOUT)
-        m = re.search(r'Symbol["\s:]+([A-Z]{2,6})\.JK', resp.text)
+        resp = requests.get(f"https://stooq.com/q/?s={q}.jk",
+                            headers=HEADERS, timeout=TIMEOUT)
+        m = re.search(r'Symbol["\\s:]+([A-Z]{2,6})\.JK', resp.text)
         if m and m.group(1) not in EXCLUDE:
             logger.info(f"Ticker Stooq: {m.group(1)}")
             return m.group(1)
     except Exception as e:
-        logger.warning(f"Stooq: {e}")
+        logger.warning(f"Stooq ticker search: {e}")
 
     return ""
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 8. MAIN ENTRY POINT
+# 7. MAIN ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════
 
 def analyze_prospectus(text: str, lang: str = "ID") -> dict:
     """
     Analisis penuh prospektus IPO.
-    lang: "ID" → Bahasa Indonesia | "EN" → English
+    lang: "ID" -> Bahasa Indonesia | "EN" -> English
     """
     lang = (lang or "ID").upper()
 
-    # Step 1: Ekstrak data mentah
-    raw = llm_extract_raw(text)
-    if not raw.get("satuan"):
-        raw["satuan"] = detect_unit(text)
-    if not raw.get("mata_uang"):
-        raw["mata_uang"] = detect_currency(text)
+    fx_rate  = detect_fx_rate(text)
+    currency = detect_currency(text)
+    unit     = detect_unit(text)
 
-    # Step 2: Hitung KPI & Financial Highlights via LLM (Gemini Pro approach)
-    fx_rate = detect_fx_rate(text)
-    financial, kpi = llm_compute_kpi(text, raw)
+    fin_raw = llm_extract_financials(text)
+    if not fin_raw.get("satuan"):
+        fin_raw["satuan"] = unit
+    if not fin_raw.get("mata_uang"):
+        fin_raw["mata_uang"] = currency
 
-    # Step 3: Analisis kualitatif (bahasa sesuai lang)
+    financial, kpi = normalize_and_compute(fin_raw, fx_rate)
+
     result = llm_qualitative(text, kpi, financial, lang=lang)
     result["financial"] = financial
     result["kpi"]       = kpi
 
-    # Step 4: Validasi ticker
     ticker = str(result.get("ticker") or "").strip().upper()
     if not ticker or not re.match(r"^[A-Z]{2,6}$", ticker):
         company_name = result.get("company_name", "")
         if company_name:
+            logger.info(f"Ticker tidak ada di dokumen, search by name: {company_name}")
             ticker = search_ticker_by_name(company_name)
         result["ticker"] = ticker
     else:
         result["ticker"] = ticker
 
-    # Step 5: Validasi use_of_funds
     uof = result.get("use_of_funds", [])
     if uof:
         total_alloc = sum(float(x.get("allocation") or 0) for x in uof)
         if total_alloc > 150:
+            logger.warning(f"use_of_funds total={total_alloc:.0f}, normalisasi ke 100")
             for item in uof:
                 item["allocation"] = round(float(item.get("allocation") or 0) / total_alloc * 100, 1)
 
