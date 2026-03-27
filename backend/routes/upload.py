@@ -7,69 +7,34 @@ import io
 router = APIRouter(prefix="/api", tags=["upload"])
 logger = logging.getLogger(__name__)
 
-MAX_PAGES = 300
-MAX_TEXT  = 500_000
+MAX_TEXT = 400_000
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
-    # PyPDF2 dulu - lebih ringan
+    """Ekstrak teks PDF menggunakan PyMuPDF (fitz) - cepat dan ringan."""
     try:
-        from PyPDF2 import PdfReader
-        reader = PdfReader(io.BytesIO(file_bytes))
-        total  = len(reader.pages)
-        limit  = min(total, MAX_PAGES)
-        pages  = []
-        logger.info(f"PyPDF2: {total} halaman, proses {limit}")
-        for i in range(limit):
+        import fitz  # PyMuPDF
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        total = len(doc)
+        logger.info(f"PyMuPDF: {total} halaman")
+
+        parts = []
+        for i in range(total):
             try:
-                t = reader.pages[i].extract_text() or ""
-                if t.strip():
-                    pages.append(t)
+                text = doc[i].get_text()
+                if text and text.strip():
+                    parts.append(text)
             except Exception:
                 pass
-        result = "\n".join(pages)
-        logger.info(f"PyPDF2: {len(result):,} karakter")
-        if len(result) > 50_000:
-            return result[:MAX_TEXT]
-        logger.info("PyPDF2 kurang, coba pdfplumber")
-    except Exception as e:
-        logger.warning(f"PyPDF2 error: {e}")
 
-    # pdfplumber - hanya halaman strategis
-    try:
-        import pdfplumber
-        parts = []
-        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-            total   = len(pdf.pages)
-            mid     = total // 2
-            indices = list(range(min(80, total)))
-            indices += list(range(max(0, mid - 30), min(total, mid + 30)))
-            indices += list(range(max(0, total - 40), total))
-            indices  = sorted(set(indices))[:MAX_PAGES]
-            logger.info(f"pdfplumber: {total} hal, proses {len(indices)} strategis")
-            for i in indices:
-                try:
-                    page = pdf.pages[i]
-                    for tbl in (page.extract_tables() or []):
-                        for row in tbl:
-                            if row:
-                                line = "\t".join(str(c or "").strip() for c in row)
-                                if line.strip():
-                                    parts.append(line)
-                    t = page.extract_text(x_tolerance=3, y_tolerance=3)
-                    if t:
-                        parts.append(t)
-                except Exception:
-                    pass
+        doc.close()
         result = "\n".join(parts)
-        logger.info(f"pdfplumber: {len(result):,} karakter")
+        logger.info(f"PyMuPDF OK: {len(result):,} karakter")
         return result[:MAX_TEXT]
-    except ImportError:
-        logger.warning("pdfplumber tidak tersedia")
-    except Exception as e:
-        logger.error(f"pdfplumber error: {e}")
 
-    return ""
+    except Exception as e:
+        logger.error(f"PyMuPDF gagal: {e}")
+        return ""
 
 
 @router.post("/upload")
@@ -95,10 +60,10 @@ async def upload_file(
     if not raw_text or len(raw_text.strip()) < 100:
         raise HTTPException(
             status_code=422,
-            detail="Gagal mengekstrak teks dari PDF. File mungkin terpassword atau corrupt."
+            detail="Gagal mengekstrak teks. File mungkin terpassword atau corrupt."
         )
 
-    logger.info(f"Teks diekstrak: {len(raw_text):,} karakter")
+    logger.info(f"Teks OK: {len(raw_text):,} karakter")
 
     try:
         analysis = Analysis(file_name=file.filename, raw_text=raw_text)
