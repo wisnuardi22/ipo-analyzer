@@ -2207,8 +2207,10 @@ export default function App() {
                               </span>
                             </div>
                             {r.desc && (
-                              <div className="px-4 py-3 bg-white dark:bg-gray-900">
-                                <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+                              <div
+                                className={`px-4 py-3 ${level === "High" ? "bg-red-50/50 dark:bg-red-900/10" : level === "Low" ? "bg-green-50/50 dark:bg-green-900/10" : "bg-yellow-50/50 dark:bg-yellow-900/10"}`}
+                              >
+                                <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
                                   {r.desc}
                                 </p>
                               </div>

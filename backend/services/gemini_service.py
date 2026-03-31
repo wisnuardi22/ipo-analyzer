@@ -125,38 +125,46 @@ _FIN_KEYWORDS = [
     "ringkasan keuangan","informasi keuangan","laba kotor","laba usaha",
     "laba bersih","pendapatan usaha","pendapatan bersih","penjualan bersih",
     "posisi keuangan","neraca","ekuitas","liabilitas","31 desember",
-    "rasio keuangan","rasio penting","konsolidasian","consolidated",
+    "rasio keuangan","rasio penting","rasio keuangan penting","konsolidasian","consolidated",
     "gross profit","net revenue","operating profit","net income",
     "profit or loss","statement of profit","balance sheet",
     "selected financial","financial highlights","total aset","total assets",
+    "return on equity","return on asset","debt to equity","earnings per share",
 ]
 
-_FIN_SYSTEM = """Kamu adalah akuntan senior Indonesia. Tugasmu: ekstrak data keuangan dari prospektus IPO.
+_FIN_SYSTEM = """Kamu adalah akuntan senior Indonesia. Tugasmu: ekstrak data keuangan LENGKAP dari prospektus IPO.
 Output HANYA JSON murni — tanpa teks lain, tanpa markdown.
 
-PENTING - INI MUNGKIN HOLDING COMPANY:
-Untuk holding company, laporan keuangan KONSOLIDASI ada di tabel "IKHTISAR DATA KEUANGAN PENTING" atau bagian tengah-akhir prospektus.
-Cari tabel dengan kolom tahun seperti: 31 Des 2022 | 31 Des 2023 | 31 Des 2024
-Atau tabel "DATA KEUANGAN KONSOLIDASIAN"
+INSTRUKSI UTAMA:
 
-INSTRUKSI:
-1. Cari SEMUA tabel keuangan: "LAPORAN LABA RUGI", "DATA KEUANGAN PENTING", "IKHTISAR DATA KEUANGAN",
-   "SELECTED FINANCIAL DATA", "CONSOLIDATED STATEMENTS", "RINGKASAN KEUANGAN", "RASIO KEUANGAN"
-2. Baca header kolom tabel -> itulah tahun. Masukkan SEMUA ke "tahun_tersedia".
-3. Untuk setiap tahun ekstrak:
-   - pendapatan: Total Pendapatan / Revenue / Penjualan / Net Revenue (BISA null untuk pure holding)
-   - laba_kotor: Laba Kotor / Gross Profit
-   - laba_usaha: Laba / Rugi Usaha / Operating Profit (bisa negatif)
-   - laba_bersih: Laba / Rugi Bersih / Net Profit (bisa negatif)
-   - depresiasi: null jika tidak ada
-4. satuan: "jutaan"/"ribuan"/"miliar"/"full"
-5. Angka (1.234) = negatif -> tulis -1234
-6. Dari neraca/posisi keuangan, tahun TERAKHIR:
-   - total_ekuitas, total_liabilitas, total_aset
-7. total_saham_beredar: saham SETELAH IPO (halaman depan)
-8. harga_penawaran: harga per saham tanpa "Rp"
+1. LAPORAN LABA RUGI — Cari tabel dengan judul:
+   "LAPORAN LABA RUGI", "IKHTISAR DATA KEUANGAN", "DATA KEUANGAN PENTING",
+   "SELECTED FINANCIAL DATA", "CONSOLIDATED STATEMENTS", "RINGKASAN KEUANGAN"
+   → Ekstrak SEMUA tahun yang ada di kolom header tabel.
+   → Untuk setiap tahun: pendapatan, laba_kotor, laba_usaha, laba_bersih, depresiasi
 
-OUTPUT JSON:
+2. RASIO KEUANGAN PENTING — Cari tabel dengan judul:
+   "RASIO KEUANGAN PENTING", "RASIO KEUANGAN", "KEY FINANCIAL RATIOS", "FINANCIAL RATIOS"
+   → Ini berisi ROE, ROA, DER, NPM, GPM, EPS, Current Ratio, dll per tahun
+   → Ekstrak ke "rasio_per_tahun" untuk setiap tahun yang ada
+   → ROE bisa disebut: "Imbal Hasil Ekuitas", "Return on Equity", "ROE"
+   → DER bisa disebut: "Debt to Equity Ratio", "Rasio Utang terhadap Ekuitas", "DER"
+   → EPS bisa disebut: "Laba per Saham", "Earnings per Share", "EPS"
+   → NPM: "Net Profit Margin", "Margin Laba Bersih"
+   → GPM: "Gross Profit Margin", "Margin Laba Kotor"
+   → Current Ratio: "Rasio Lancar"
+
+3. NERACA/POSISI KEUANGAN — Tahun TERAKHIR:
+   total_ekuitas, total_liabilitas, total_aset
+
+4. IPO INFO:
+   total_saham_beredar: total saham SETELAH IPO
+   harga_penawaran: angka saja tanpa "Rp" (null jika DRHP/belum final)
+
+5. Satuan: "jutaan"/"ribuan"/"miliar"/"full" dari header tabel
+6. Angka negatif dalam kurung (1.234) → tulis -1234
+
+OUTPUT JSON WAJIB:
 {
   "satuan": "jutaan",
   "mata_uang": "IDR",
@@ -164,58 +172,15 @@ OUTPUT JSON:
   "data_per_tahun": [
     {"tahun":"2022","pendapatan":null,"laba_kotor":null,"laba_usaha":null,"laba_bersih":null,"depresiasi":null}
   ],
+  "rasio_per_tahun": [
+    {"tahun":"2022","roe":null,"roa":null,"der":null,"npm":null,"gpm":null,"eps":null,"current_ratio":null}
+  ],
   "total_ekuitas": null,
   "total_liabilitas": null,
   "total_aset": null,
   "total_saham_beredar": null,
   "harga_penawaran": null
 }"""
-
-
-def llm_extract_financials(text: str) -> Dict[str, Any]:
-    merged: Dict[str, Any] = {
-        "satuan": None, "mata_uang": None,
-        "tahun_tersedia": [], "data_per_tahun": [],
-        "total_ekuitas": None, "total_liabilitas": None, "total_aset": None,
-        "total_saham_beredar": None, "harga_penawaran": None,
-    }
-
-    all_chunks = _chunk_text(text, max_len=18000, overlap=800)
-
-    # Pilih chunk prioritas
-    priority, others = [], []
-    for c in all_chunks:
-        cl = c.lower()
-        if "daftar isi" in cl and cl.count("halaman")>5: continue
-        if any(k in cl for k in _FIN_KEYWORDS): priority.append(c)
-        else: others.append(c)
-
-    # Tambah chunk tengah (holding company simpan data di tengah dokumen)
-    mid = len(all_chunks)//2
-    selected = list(priority[:8])
-    for idx in [0, mid-1, mid, mid+1, len(all_chunks)-1]:
-        try:
-            c = all_chunks[idx]
-            if c not in selected: selected.append(c)
-        except: pass
-    selected = selected[:12]
-
-    for chunk in selected:
-        try:
-            resp = client.chat.completions.create(
-                model=MODEL, temperature=0.01, max_tokens=4000,
-                messages=[
-                    {"role":"system","content":_FIN_SYSTEM},
-                    {"role":"user","content":f"DOKUMEN:\n{chunk}"},
-                ],
-            )
-            part = _safe_json(resp.choices[0].message.content) or {}
-        except Exception as e:
-            logger.warning(f"LLM financial chunk error: {e}")
-            part = {}
-
-        for k in ("satuan","mata_uang"):
-            if not merged[k] and part.get(k): merged[k] = part[k]
 
         if part.get("tahun_tersedia"):
             merged["tahun_tersedia"] = sorted(set(merged["tahun_tersedia"])|set(str(y) for y in part["tahun_tersedia"]))
@@ -232,6 +197,20 @@ def llm_extract_financials(text: str) -> Dict[str, Any]:
                             m_dict[y][k] = v
                 else: m_dict[y] = d
             merged["data_per_tahun"] = [m_dict[k] for k in sorted(m_dict.keys())]
+
+        # Merge rasio keuangan penting
+        if part.get("rasio_per_tahun"):
+            r_dict = {str(r.get("tahun","")).strip():r for r in merged.get("rasio_per_tahun",[])}
+            for r in part["rasio_per_tahun"]:
+                y = str(r.get("tahun","")).strip()
+                if not y: continue
+                if y in r_dict:
+                    for k in ("roe","roa","der","npm","gpm","eps","current_ratio"):
+                        v = r.get(k)
+                        if r_dict[y].get(k) is None and v is not None and str(v).strip() not in ("null",""):
+                            r_dict[y][k] = v
+                else: r_dict[y] = r
+            merged["rasio_per_tahun"] = [r_dict[k] for k in sorted(r_dict.keys())]
 
         for k in ("total_ekuitas","total_liabilitas","total_aset","total_saham_beredar","harga_penawaran"):
             v = part.get(k)
@@ -279,11 +258,35 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
         ebitda_margin.append({"year":y,"value":to_pct(safe_div(float(op)+float(dep),rev)) if (dep is not None and op is not None and rev) else None})
         net_margin.append({"year":y,"value":to_pct(safe_div(net,rev))})
 
-    kpi = {"pe":"N/A","pb":"N/A","roe":"N/A","der":"N/A","eps":"N/A","market_cap":"N/A"}
+    kpi = {"pe":"N/A","pb":"N/A","roe":"N/A","der":"N/A","eps":"N/A","market_cap":"N/A",
+           "roe_by_year":{},"der_by_year":{},"eps_by_year":{},"npm_by_year":{},"gpm_by_year":{}}
     laba_last = years_data[-1].get("laba_bersih") if years_data else None
 
+    # Baca rasio langsung dari tabel "Rasio Keuangan Penting"
+    rasio_list = fin_raw.get("rasio_per_tahun", [])
+    if rasio_list:
+        for r in rasio_list:
+            y = str(r.get("tahun","")).strip()
+            if not y: continue
+            for field, kpi_key in [("roe","roe_by_year"),("der","der_by_year"),
+                                    ("eps","eps_by_year"),("npm","npm_by_year"),("gpm","gpm_by_year")]:
+                v = parse_num(r.get(field))
+                if v is not None:
+                    kpi[kpi_key][y] = v
+
+        # Ambil nilai tahun terakhir untuk display
+        last_rasio = rasio_list[-1] if rasio_list else {}
+        roe_v = parse_num(last_rasio.get("roe"))
+        der_v = parse_num(last_rasio.get("der"))
+        eps_v = parse_num(last_rasio.get("eps"))
+        if roe_v is not None: kpi["roe"] = f"{roe_v:.1f}%"
+        if der_v is not None: kpi["der"] = f"{der_v:.2f}x"
+        if eps_v is not None:
+            kpi["eps"] = f"Rp {eps_v:,.2f}".replace(",",".") if currency=="IDR" else f"{eps_v:.2f}"
+
+    # Hitung dari laporan keuangan jika rasio tidak tersedia
     try:
-        if saham and laba_last and saham>0:
+        if saham and laba_last and saham>0 and kpi["eps"]=="N/A":
             eps_val = laba_last/saham
             kpi["eps"] = f"Rp {eps_val:,.2f}".replace(",",".") if currency=="IDR" else f"{currency} {eps_val:.4f}"
             if harga_idr and eps_val>0: kpi["pe"] = f"{harga_idr/eps_val:.1f}x"
@@ -295,10 +298,12 @@ def normalize_and_compute(fin_raw: Dict, fx_rate: Optional[float]) -> Tuple[Dict
             if bvps>0: kpi["pb"] = f"{harga_idr/bvps:.2f}x"
     except: pass
     try:
-        if ekuitas and laba_last and ekuitas>0: kpi["roe"] = f"{laba_last/ekuitas*100:.1f}%"
+        if ekuitas and laba_last and ekuitas>0 and kpi["roe"]=="N/A":
+            kpi["roe"] = f"{laba_last/ekuitas*100:.1f}%"
     except: pass
     try:
-        if ekuitas and liabilitas and ekuitas>0: kpi["der"] = f"{liabilitas/ekuitas:.2f}x"
+        if ekuitas and liabilitas and ekuitas>0 and kpi["der"]=="N/A":
+            kpi["der"] = f"{liabilitas/ekuitas:.2f}x"
     except: pass
     try:
         if saham and harga and saham>0 and harga>0:
@@ -329,40 +334,52 @@ def llm_qualitative(text: str, kpi: Dict, financial: Dict, lang: str="ID") -> Di
 
     if is_en:
         lang_rule = "CRITICAL: Write ALL text output fields in ENGLISH ONLY. No Bahasa Indonesia."
-        uof_rule = """MANDATORY - Find "Use of Proceeds" or "Rencana Penggunaan Dana" section.
-Extract EVERY allocation item with EXACT percentage from document.
-- allocation = EXACT number from document (e.g. 55, 30, 15)
-- Total MUST equal 100
-- NEVER invent percentages
-- If no % given, calculate proportionally from nominal amounts
-- At least 2 items required
-- description: include specific project names and nominal values"""
-        risk_rule = """MANDATORY - Find "Risk Factors" chapter.
-Extract 4-6 SPECIFIC risks from that chapter only.
-Each risk: level (High/Medium/Low), title, desc with specific facts from document.
-DO NOT use generic risks."""
-        benefit_rule = """MANDATORY - Find "Competitive Advantages", "Keunggulan Kompetitif", or front summary.
-Extract 4-6 SPECIFIC competitive strengths with concrete data/numbers.
-DO NOT invent benefits."""
-        summary_hint = "3 PARAGRAPHS IN ENGLISH. P1: Company profile + numbers. P2: IPO details. P3: Financial condition + outlook."
+        uof_rule = """MANDATORY - Find the section titled exactly "Use of Proceeds" or "Rencana Penggunaan Dana".
+Read the ACTUAL text and table in that section carefully.
+- Extract EVERY item listed with its EXACT percentage or amount
+- allocation = the EXACT percentage number written in the document
+- Total MUST equal 100 (normalize if needed)
+- category: use the EXACT category name from the document (e.g. "Working Capital", "Capital Expenditure", "Debt Repayment")
+- description: copy specific details - project names, subsidiary names, nominal amounts from that section
+- NEVER use generic descriptions - every prospectus has different use of proceeds
+- At least 2 items, up to 6 items"""
+        risk_rule = """MANDATORY - Find the chapter titled "Risk Factors".
+Read ALL risks listed in that chapter carefully.
+Extract 4-6 MOST SIGNIFICANT risks:
+- level: "High" if explicitly stated as main/primary risk or involves customer concentration/regulatory/financial; "Medium" for operational risks; "Low" for minor risks
+- title: exact risk name from document
+- desc: 1-2 sentences with SPECIFIC facts: percentages, customer names, amounts mentioned in the document
+DO NOT write generic descriptions - use actual data from the document."""
+        benefit_rule = """MANDATORY - Find "Competitive Strengths", "Keunggulan Kompetitif", or company overview section.
+Extract 4-6 SPECIFIC strengths actually stated in the document:
+- title: exact strength name from document
+- desc: specific supporting data/numbers/facts from the document
+DO NOT invent or generalize - only use what is explicitly stated."""
+        summary_hint = "3 PARAGRAPHS IN ENGLISH. P1: Company profile, business activities, key numbers. P2: IPO structure - shares offered, price, total proceeds, listing date. P3: Financial performance, growth trend, business outlook."
     else:
         lang_rule = "WAJIB: Tulis SEMUA field teks output dalam BAHASA INDONESIA."
-        uof_rule = """WAJIB - Cari bagian "Rencana Penggunaan Dana" atau "Penggunaan Dana Hasil Penawaran Umum".
-Ekstrak SETIAP item alokasi dengan persentase PERSIS dari dokumen.
-- allocation = angka PERSIS dari dokumen (misal: 55, 30, 15)
-- Total HARUS = 100
-- DILARANG mengarang persentase
-- Jika tidak ada %, hitung proporsional dari nominal
-- Minimal 2 item wajib
-- description: sertakan nama proyek spesifik dan nilai nominal"""
+        uof_rule = """WAJIB - Cari bagian yang judulnya "Rencana Penggunaan Dana" atau "Penggunaan Dana Hasil Penawaran Umum".
+Baca teks dan tabel di bagian itu dengan teliti.
+- Ekstrak SETIAP item yang tercantum dengan persentase atau nominal PERSIS dari dokumen
+- allocation = angka persentase PERSIS yang tertulis di dokumen
+- Total HARUS = 100 (normalisasi jika perlu)
+- category: gunakan nama kategori PERSIS dari dokumen (misal: "Modal Kerja", "Belanja Modal", "Pelunasan Utang")
+- description: salin detail spesifik - nama proyek, nama anak perusahaan, nilai nominal dari bagian itu
+- JANGAN gunakan deskripsi generik - setiap prospektus punya rencana penggunaan dana yang berbeda
+- Minimal 2 item, maksimal 6 item"""
         risk_rule = """WAJIB - Cari bab "Faktor Risiko".
-Ekstrak 4-6 risiko SPESIFIK hanya dari bab itu.
-Setiap risiko: level (High/Medium/Low), title, desc dengan fakta spesifik dari dokumen.
-JANGAN gunakan risiko generik."""
-        benefit_rule = """WAJIB - Cari "Keunggulan Kompetitif" atau "Prospek Usaha" atau ringkasan depan.
-Ekstrak 4-6 keunggulan SPESIFIK dengan data/angka konkret.
-JANGAN mengarang keunggulan."""
-        summary_hint = "3 PARAGRAF BAHASA INDONESIA. P1: Profil perusahaan + angka. P2: Detail IPO. P3: Kondisi keuangan + prospek."
+Baca SEMUA risiko yang tercantum di bab itu dengan teliti.
+Ekstrak 4-6 risiko PALING SIGNIFIKAN:
+- level: "High" jika disebutkan sebagai risiko utama/material atau menyangkut ketergantungan pelanggan/regulasi/keuangan; "Medium" untuk risiko operasional; "Low" untuk risiko minor
+- title: nama risiko PERSIS dari dokumen
+- desc: 1-2 kalimat dengan fakta SPESIFIK: persentase, nama pelanggan, nilai yang disebut di dokumen
+JANGAN tulis deskripsi generik - gunakan data aktual dari dokumen."""
+        benefit_rule = """WAJIB - Cari "Keunggulan Kompetitif" atau bagian overview perusahaan.
+Ekstrak 4-6 keunggulan SPESIFIK yang benar-benar tercantum di dokumen:
+- title: nama keunggulan persis dari dokumen
+- desc: data/angka/fakta spesifik pendukung dari dokumen
+JANGAN mengarang atau menggeneralisasi - hanya gunakan yang tersebut eksplisit."""
+        summary_hint = "3 PARAGRAF BAHASA INDONESIA. P1: Profil perusahaan, kegiatan usaha, angka kunci. P2: Struktur IPO - saham ditawarkan, harga, total dana, tanggal listing. P3: Kinerja keuangan, tren pertumbuhan, prospek usaha."
 
     prompt = f"""Kamu adalah analis IPO senior Indonesia. Analisis prospektus ini secara AKURAT.
 
