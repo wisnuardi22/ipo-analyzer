@@ -421,19 +421,26 @@ OUTPUT JSON:
 
     try:
         resp = client.chat.completions.create(
-            model=MODEL, temperature=0.1, max_tokens=8000,
+            model=MODEL, temperature=0.1, max_tokens=16000,
             messages=[{"role":"user","content":prompt}],
         )
         raw = resp.choices[0].message.content.strip()
         result = _safe_json(raw)
         if result: return result
+        # Repair JSON terpotong
         fixed = re.sub(r",\s*([}\]])",r"\1",raw)
-        s, e = fixed.find("{"), fixed.rfind("}")+1
-        if s!=-1 and e>s:
-            for end in range(e,s,-200):
+        s = fixed.find("{")
+        if s != -1:
+            snippet = fixed[s:]
+            ob = snippet.count("{") - snippet.count("}")
+            ol = snippet.count("[") - snippet.count("]")
+            closed = snippet + ("]" * max(0,ol)) + ("}" * max(0,ob))
+            result = _safe_json(closed)
+            if result: return result
+            for end in range(len(fixed), s, -100):
                 try: return json.loads(fixed[s:end])
                 except: pass
-        raise ValueError(f"JSON parse failed: {raw[:200]}")
+        raise ValueError(f"JSON parse failed: {raw[:300]}")
     except Exception as e:
         logger.error(f"LLM qualitative error: {e}")
         raise ValueError(f"Gagal analisis kualitatif: {e}")

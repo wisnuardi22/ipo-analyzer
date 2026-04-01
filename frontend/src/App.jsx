@@ -890,6 +890,10 @@ export default function App() {
     }
   };
 
+  const handlePrint = () => {
+    window.print();
+  };
+
   const handleLogin = (e) => {
     e.preventDefault();
     if (loginForm.email && loginForm.password) {
@@ -931,6 +935,28 @@ export default function App() {
       className={`min-h-screen ${dark ? "bg-gray-900" : "bg-gray-50"}`}
       style={{ fontFamily: "Inter,sans-serif" }}
     >
+      <style>{`
+        @media print {
+          @page { size: A4; margin: 15mm; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          header, #service, #about, #contact, footer,
+          button, .no-print { display: none !important; }
+          #dashboard { display: block !important; padding: 0 !important; }
+          .print\:break-before { page-break-before: always; }
+          * { box-shadow: none !important; }
+          .bg-slate-50, .bg-gray-50, .bg-gray-800 { background: white !important; }
+          .dark\:bg-gray-900, .dark\:bg-gray-800 { background: white !important; }
+          .text-white { color: #1f2937 !important; }
+          .bg-gradient-to-r, .bg-gradient-to-br, .bg-slate-900, .bg-slate-800 {
+            background: #f9fafb !important; border: 1px solid #e5e7eb !important;
+          }
+          .recharts-wrapper { page-break-inside: avoid; }
+          h1, h2, h3, h4 { color: #111827 !important; }
+          .text-gray-300, .text-gray-400, .text-gray-500 { color: #6b7280 !important; }
+          .text-emerald-400, .text-emerald-600 { color: #059669 !important; }
+        }
+      `}</style>
+
       {/* ── LOGIN MODAL ── */}
       {showLogin && (
         <div
@@ -1415,6 +1441,13 @@ export default function App() {
                     {status}
                   </span>
                 )}
+                <button
+                  onClick={handlePrint}
+                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg font-semibold text-sm transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  {lang === "EN" ? "Print / Export" : "Cetak / Ekspor"}
+                </button>
                 <button
                   onClick={() => {
                     setReady(false);
