@@ -937,23 +937,62 @@ export default function App() {
     >
       <style>{`
         @media print {
-          @page { size: A4; margin: 15mm; }
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          header, #service, #about, #contact, footer,
-          button, .no-print { display: none !important; }
+          @page { size: A4 landscape; margin: 10mm; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; font-size: 11px; }
+          header, #service, #about, #contact, footer, button { display: none !important; }
           #dashboard { display: block !important; padding: 0 !important; }
-          .print\:break-before { page-break-before: always; }
+          section#dashboard { padding: 0 !important; }
+          .max-w-7xl { max-width: 100% !important; padding: 0 !important; }
+
+          /* Prevent cutting */
+          .rounded-2xl, .rounded-xl { page-break-inside: avoid; break-inside: avoid; }
+          .grid { page-break-inside: avoid; break-inside: avoid; }
+          .recharts-wrapper, .recharts-responsive-container { page-break-inside: avoid; break-inside: avoid; }
+
+          /* Financial charts - 2 per row landscape */
+          .grid.grid-cols-1.md\:grid-cols-2 { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+
+          /* KPI cards - all in one row */
+          .grid.grid-cols-2.md\:grid-cols-3.lg\:grid-cols-6 { display: grid !important; grid-template-columns: repeat(6,1fr) !important; gap: 6px !important; }
+
+          /* IPO summary - 4 col */
+          .grid.grid-cols-2.md\:grid-cols-4 { display: grid !important; grid-template-columns: repeat(4,1fr) !important; }
+
+          /* Risk & proceeds side by side */
+          .grid.grid-cols-1.lg\:grid-cols-2 { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+
+          /* Color fixes */
           * { box-shadow: none !important; }
-          .bg-slate-50, .bg-gray-50, .bg-gray-800 { background: white !important; }
-          .dark\:bg-gray-900, .dark\:bg-gray-800 { background: white !important; }
-          .text-white { color: #1f2937 !important; }
-          .bg-gradient-to-r, .bg-gradient-to-br, .bg-slate-900, .bg-slate-800 {
-            background: #f9fafb !important; border: 1px solid #e5e7eb !important;
-          }
-          .recharts-wrapper { page-break-inside: avoid; }
-          h1, h2, h3, h4 { color: #111827 !important; }
-          .text-gray-300, .text-gray-400, .text-gray-500 { color: #6b7280 !important; }
-          .text-emerald-400, .text-emerald-600 { color: #059669 !important; }
+          .bg-slate-900, .bg-slate-800, .bg-gray-900 { background: #1e293b !important; }
+          .bg-slate-50, .bg-gray-50 { background: #f8fafc !important; }
+          .bg-white { background: white !important; }
+          .text-white { color: white !important; }
+          .text-gray-900 { color: #111827 !important; }
+
+          /* Risk colors - preserve */
+          .bg-red-50, .dark\:bg-red-900\/30 { background: #fef2f2 !important; }
+          .bg-yellow-50, .dark\:bg-yellow-900\/30 { background: #fefce8 !important; }
+          .bg-green-50, .dark\:bg-green-900\/30 { background: #f0fdf4 !important; }
+          .border-red-200 { border-color: #fecaca !important; }
+          .border-yellow-200 { border-color: #fef08a !important; }
+          .border-green-200 { border-color: #bbf7d0 !important; }
+          .text-red-600 { color: #dc2626 !important; }
+          .text-yellow-600 { color: #ca8a04 !important; }
+          .text-green-600 { color: #16a34a !important; }
+          .text-emerald-600, .text-emerald-400 { color: #059669 !important; }
+
+          /* Reduce spacing */
+          .mb-8 { margin-bottom: 8px !important; }
+          .mb-6 { margin-bottom: 6px !important; }
+          .p-8 { padding: 12px !important; }
+          .p-6 { padding: 10px !important; }
+          .p-5 { padding: 8px !important; }
+          .py-20 { padding-top: 8px !important; padding-bottom: 8px !important; }
+
+          h2 { font-size: 16px !important; }
+          h3 { font-size: 14px !important; }
+          h4 { font-size: 12px !important; }
+          p, span, div { font-size: 11px !important; }
         }
       `}</style>
 

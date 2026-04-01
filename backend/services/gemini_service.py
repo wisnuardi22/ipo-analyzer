@@ -96,9 +96,17 @@ _FIN_SYSTEM = (
     "INSTRUKSI:\n"
     "1. Cari tabel LAPORAN LABA RUGI / IKHTISAR DATA KEUANGAN / SELECTED FINANCIAL DATA\n"
     "   Ekstrak semua tahun: pendapatan, laba_kotor, laba_usaha, laba_bersih, depresiasi\n"
-    "2. Cari tabel RASIO KEUANGAN PENTING / KEY FINANCIAL RATIOS\n"
-    "   Ekstrak per tahun: roe, roa, der, npm, gpm, eps, current_ratio\n"
-    "   ROE=Imbal Hasil Ekuitas, DER=Debt to Equity, EPS=Laba per Saham\n"
+    "2. WAJIB - Cari tabel RASIO KEUANGAN PENTING / KEY FINANCIAL RATIOS / RASIO KEUANGAN\n"
+    "   Tabel ini biasanya ada di bagian Ikhtisar Data Keuangan Penting.\n"
+    "   Ekstrak PERSIS angka yang tertulis, per tahun:\n"
+    "   - roe: ROE / Imbal Hasil Ekuitas / Return on Equity (dalam %, tulis angkanya saja misal 7.39)\n"
+    "   - der: DER / Debt to Equity Ratio / Rasio Utang terhadap Ekuitas (tulis angkanya saja misal 1.56)\n"
+    "   - eps: EPS / Laba per Saham (tulis angkanya saja misal 10)\n"
+    "   - npm: Net Profit Margin / Margin Laba Bersih (dalam %)\n"
+    "   - gpm: Gross Profit Margin / Margin Laba Kotor (dalam %)\n"
+    "   - roa: ROA / Return on Asset / Imbal Hasil Aset (dalam %)\n"
+    "   - current_ratio: Rasio Lancar / Current Ratio\n"
+    "   PENTING: Salin angka PERSIS dari tabel, JANGAN hitung sendiri!\n"
     "3. Dari neraca tahun TERAKHIR: total_ekuitas, total_liabilitas, total_aset\n"
     "4. total_saham_beredar: saham SETELAH IPO\n"
     "5. harga_penawaran: angka saja tanpa Rp (null jika DRHP/belum final)\n"
@@ -279,7 +287,8 @@ def normalize_and_compute(fin_raw, fx_rate):
         if eps_v is not None:
             kpi["eps"] = f"Rp {eps_v:,.2f}".replace(",",".") if currency=="IDR" else f"{eps_v:.2f}"
 
-    # Fallback hitung dari laporan keuangan jika rasio tidak ada
+    # Fallback hitung HANYA jika rasio_per_tahun kosong (tidak ada tabel rasio di dokumen)
+    has_rasio = bool(rasio_list)
     try:
         if saham and laba_last and saham>0 and kpi["eps"]=="N/A":
             eps_val = laba_last/saham
@@ -293,11 +302,13 @@ def normalize_and_compute(fin_raw, fx_rate):
             if bvps>0: kpi["pb"] = f"{harga_idr/bvps:.2f}x"
     except: pass
     try:
-        if ekuitas and laba_last and ekuitas>0 and kpi["roe"]=="N/A":
+        # Hanya hitung ROE dari laporan keuangan jika TIDAK ada tabel rasio
+        if not has_rasio and ekuitas and laba_last and ekuitas>0 and kpi["roe"]=="N/A":
             kpi["roe"] = f"{laba_last/ekuitas*100:.1f}%"
     except: pass
     try:
-        if ekuitas and liabilitas and ekuitas>0 and kpi["der"]=="N/A":
+        # Hanya hitung DER dari neraca jika TIDAK ada tabel rasio
+        if not has_rasio and ekuitas and liabilitas and ekuitas>0 and kpi["der"]=="N/A":
             kpi["der"] = f"{liabilitas/ekuitas:.2f}x"
     except: pass
     try:
