@@ -7,7 +7,9 @@ from openai import OpenAI
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 logger = logging.getLogger(__name__)
 client = OpenAI(api_key=os.environ.get("SUMOPOD_API_KEY"), base_url="https://ai.sumopod.com/v1")
-MODEL = "gemini/gemini-2.5-flash"
+MODEL_FLASH = "gemini/gemini-2.5-flash"
+MODEL_PRO   = "gemini/gemini-2.5-pro"
+MODEL       = MODEL_FLASH  # backward compat
 
 # ── NUMBER UTILS ──────────────────────────────────────────────────────
 def parse_num(raw):
@@ -153,7 +155,8 @@ def _safe_json(raw):
         except: pass
     return None
 
-def llm_extract_financials(text):
+def llm_extract_financials(text, model=None):
+    _m = model or MODEL_FLASH
     merged = {
         "satuan": None, "mata_uang": None,
         "tahun_tersedia": [], "data_per_tahun": [],
@@ -180,7 +183,7 @@ def llm_extract_financials(text):
     for chunk in selected:
         try:
             resp = client.chat.completions.create(
-                model=MODEL, temperature=0.01, max_tokens=4000,
+                model=_m, temperature=0.01, max_tokens=4000,
                 messages=[
                     {"role":"system","content":_FIN_SYSTEM},
                     {"role":"user","content":f"DOKUMEN:\n{chunk}"},
@@ -330,7 +333,8 @@ def normalize_and_compute(fin_raw, fx_rate):
     return financial, kpi
 
 # ── LLM QUALITATIVE ───────────────────────────────────────────────────
-def llm_qualitative(text, kpi, financial, lang="ID"):
+def llm_qualitative(text, kpi, financial, lang="ID", model=None):
+    _m = model or MODEL_FLASH
     is_en    = lang.upper()=="EN"
     currency = financial.get("currency","IDR")
     years    = financial.get("years",[])
@@ -432,7 +436,7 @@ OUTPUT JSON:
 
     try:
         resp = client.chat.completions.create(
-            model=MODEL, temperature=0.1, max_tokens=16000,
+            model=_m, temperature=0.1, max_tokens=16000,
             messages=[{"role":"user","content":prompt}],
         )
         raw = resp.choices[0].message.content.strip()
@@ -481,20 +485,21 @@ def search_ticker_by_name(company_name):
     return ""
 
 # ── MAIN ──────────────────────────────────────────────────────────────
-def analyze_prospectus(text, lang="ID"):
+def analyze_prospectus(text, lang="ID", model=None):
     lang = (lang or "ID").upper()
     fx_rate  = detect_fx_rate(text)
     currency = detect_currency(text)
     unit     = detect_unit(text)
 
-    fin_raw = llm_extract_financials(text)
+    _model = model or MODEL_FLASH
+    fin_raw = llm_extract_financials(text, model=_model)
     if not fin_raw.get("satuan"): fin_raw["satuan"] = unit
     if not fin_raw.get("mata_uang"): fin_raw["mata_uang"] = currency
 
     financial, kpi = normalize_and_compute(fin_raw, fx_rate)
     logger.info(f"[KPI] {kpi}")
 
-    result = llm_qualitative(text, kpi, financial, lang=lang)
+    result = llm_qualitative(text, kpi, financial, lang=lang, model=_model)
     result["financial"] = financial
     result["kpi"]       = kpi
 

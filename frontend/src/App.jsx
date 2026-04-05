@@ -730,6 +730,7 @@ const _buildMapped = (d) => {
     riskColor: d.risk_color || _computeRiskColor(d.risks || []),
     riskReason: d.risk_reason || "",
     underwriter: d.underwriter || d.ipo_details?.underwriter || null,
+    isPro: (d.plan || d.ipo_details?.plan || "basic") === "pro",
   };
 };
 
@@ -761,7 +762,8 @@ export default function App() {
   const [loginErr, setLoginErr] = useState("");
   // ── NEW STATES ──
   const [analysisId, setAnalysisId] = useState(null);
-  const [kpiYear, setKpiYear] = useState(null); // null = tahun terakhir (default)
+  const [kpiYear, setKpiYear] = useState(null);
+  // null = tahun terakhir (default)
 
   const tvSymbolRef = useRef(null);
   const tvMiniChartRef = useRef(null);
@@ -847,7 +849,10 @@ export default function App() {
           ? "AI is analyzing document..."
           : "AI sedang menganalisis dokumen...",
       );
-      await axios.post(`${API_BASE}/analyze/${up.data.analysis_id}`, { lang });
+      await axios.post(`${API_BASE}/analyze/${up.data.analysis_id}`, {
+        lang,
+        plan,
+      });
       const res = await axios.get(
         `${API_BASE}/analysis/${up.data.analysis_id}`,
       );
@@ -880,7 +885,10 @@ export default function App() {
     if (!ready || !analysisId) return;
     try {
       setStatus(newLang === "EN" ? "Translating..." : "Menerjemahkan...");
-      await axios.post(`${API_BASE}/analyze/${analysisId}`, { lang: newLang });
+      await axios.post(`${API_BASE}/analyze/${analysisId}`, {
+        lang: newLang,
+        plan: data?.plan || "basic",
+      });
       const res = await axios.get(`${API_BASE}/analysis/${analysisId}`);
       setData(_buildMapped(res.data));
       setKpiYear(null);
@@ -1246,6 +1254,7 @@ export default function App() {
                 unit: null,
                 features: l.svc.bf,
                 pop: false,
+                model: "Flash",
               },
               {
                 key: "pro",
@@ -1254,6 +1263,7 @@ export default function App() {
                 unit: "/analisis",
                 features: l.svc.pf,
                 pop: true,
+                model: "Pro",
               },
             ].map((p) => (
               <div
@@ -1267,9 +1277,16 @@ export default function App() {
                   </div>
                 )}
                 <div className="text-center mb-6">
-                  <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-                    {p.title}
-                  </h3>
+                  <div className="flex items-center justify-center gap-2 mb-1">
+                    <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {p.title}
+                    </h3>
+                    <span
+                      className={`text-xs font-bold px-2 py-0.5 rounded-full ${p.key === "pro" ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}
+                    >
+                      Gemini {p.model}
+                    </span>
+                  </div>
                   <div className="flex items-baseline justify-center gap-1">
                     <span className="text-4xl font-bold text-gray-900 dark:text-white">
                       {p.price}
@@ -1456,11 +1473,22 @@ export default function App() {
             {/* Header */}
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-10 gap-4">
               <div>
-                <div className="inline-flex items-center gap-2 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 rounded-full px-4 py-1.5 mb-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                  <span className="text-emerald-600 dark:text-emerald-400 text-sm font-semibold">
-                    {l.dash.badge}
-                  </span>
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  <div className="inline-flex items-center gap-2 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 rounded-full px-4 py-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span className="text-emerald-600 dark:text-emerald-400 text-sm font-semibold">
+                      {l.dash.badge}
+                    </span>
+                  </div>
+                  {D.isPro ? (
+                    <span className="inline-flex items-center gap-1 bg-gradient-to-r from-purple-100 to-purple-50 dark:from-purple-900/30 dark:to-purple-800/20 border border-purple-200 dark:border-purple-700 rounded-full px-3 py-1.5 text-purple-700 dark:text-purple-300 text-sm font-bold">
+                      <Sparkles className="w-3.5 h-3.5" /> Pro · Gemini 2.5 Pro
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-full px-3 py-1.5 text-gray-500 dark:text-gray-400 text-sm font-medium">
+                      Basic · Gemini Flash
+                    </span>
+                  )}
                 </div>
                 <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
                   {l.dash.title}
@@ -1480,6 +1508,7 @@ export default function App() {
                     {status}
                   </span>
                 )}
+
                 <button
                   onClick={handlePrint}
                   className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg font-semibold text-sm transition-colors"
