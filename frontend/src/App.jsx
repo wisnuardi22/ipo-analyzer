@@ -141,17 +141,21 @@ const T = {
       free: "Free",
       pro: "Pro",
       bf: [
-        "Comprehensive Company Profile",
-        "Use of Proceeds Overview",
-        "IPO Offering Summary",
-        "Standard Risk Assessment",
+        "Company Profile & IPO Summary",
+        "Use of Proceeds (Overview)",
+        "4-6 Risk Factors",
+        "3-4 Investment Benefits",
+        "Standard Financial Highlights",
+        "Powered by Gemini Flash",
       ],
       pf: [
-        "Everything in Basic",
-        "Industry-Specific KPIs",
-        "Comprehensive Financial Highlights",
-        "Revenue, EBITDA & Profit Trends",
-        "Advanced Risk Analysis",
+        "Everything in Basic (More Detail)",
+        "Detailed Use of Proceeds with Amounts",
+        "KPI from Rasio Keuangan Table",
+        "Full Financial Trends (4+ Years)",
+        "6+ Deep Risk Analysis with Data",
+        "5-7 Competitive Strengths",
+        "Powered by Gemini Pro (Higher Accuracy)",
       ],
       pop: "Most Popular",
       sel: "Select Plan",
@@ -296,17 +300,21 @@ const T = {
       free: "Gratis",
       pro: "Pro",
       bf: [
-        "Profil Perusahaan Lengkap",
-        "Ikhtisar Penggunaan Dana IPO",
-        "Ringkasan Penawaran IPO",
-        "Penilaian Risiko Standar",
+        "Profil Perusahaan & Ringkasan IPO",
+        "Penggunaan Dana (Ikhtisar)",
+        "4-6 Faktor Risiko",
+        "3-4 Keunggulan Investasi",
+        "Sorotan Keuangan Standar",
+        "Didukung Gemini Flash",
       ],
       pf: [
-        "Semua fitur Dasar",
-        "KPI Spesifik Industri",
-        "Sorotan Keuangan Komprehensif",
-        "Tren Revenue, EBITDA & Laba",
-        "Analisis Risiko Mendalam",
+        "Semua fitur Dasar (Lebih Detail)",
+        "Penggunaan Dana Detail + Nilai Nominal",
+        "KPI dari Tabel Rasio Keuangan",
+        "Tren Keuangan Lengkap (4+ Tahun)",
+        "6+ Analisis Risiko Mendalam",
+        "5-7 Keunggulan Kompetitif",
+        "Didukung Gemini Pro (Akurasi Tinggi)",
       ],
       pop: "Paling Populer",
       sel: "Pilih Paket",
@@ -2309,9 +2317,15 @@ export default function App() {
                             </div>
                             {r.desc && (
                               <div
-                                className={`px-4 py-3 ${level === "High" ? "bg-red-50/50 dark:bg-red-900/10" : level === "Low" ? "bg-green-50/50 dark:bg-green-900/10" : "bg-yellow-50/50 dark:bg-yellow-900/10"}`}
+                                className={`px-4 py-3 border-t ${
+                                  level === "High"
+                                    ? "bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800"
+                                    : level === "Low"
+                                      ? "bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800"
+                                      : "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-100 dark:border-yellow-800"
+                                }`}
                               >
-                                <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                                <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">
                                   {r.desc}
                                 </p>
                               </div>
