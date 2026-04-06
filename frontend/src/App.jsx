@@ -711,7 +711,11 @@ const _buildMapped = (d) => {
         d.ipo_details?.market_cap ||
         "N/A",
     },
-    kpiByYear: kpiData,
+    kpiByYear: {
+      roe: kpiData.roe_by_year || {},
+      der: kpiData.der_by_year || {},
+      eps: kpiData.eps_by_year || {},
+    },
     financialYears: finData.years || [],
     financialTrends: {
       revenue: normFinancial(finData.revenue_growth) || [],
@@ -966,16 +970,16 @@ export default function App() {
           .recharts-wrapper, .recharts-responsive-container { page-break-inside: avoid; break-inside: avoid; }
 
           /* Financial charts - 2 per row landscape */
-          .grid.grid-cols-1.md\:grid-cols-2 { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+          .grid.grid-cols-1.md\\:grid-cols-2 { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
 
           /* KPI cards - all in one row */
-          .grid.grid-cols-2.md\:grid-cols-3.lg\:grid-cols-6 { display: grid !important; grid-template-columns: repeat(6,1fr) !important; gap: 6px !important; }
+          .grid.grid-cols-2.md\\:grid-cols-3.lg\\:grid-cols-6 { display: grid !important; grid-template-columns: repeat(6,1fr) !important; gap: 6px !important; }
 
           /* IPO summary - 4 col */
-          .grid.grid-cols-2.md\:grid-cols-4 { display: grid !important; grid-template-columns: repeat(4,1fr) !important; }
+          .grid.grid-cols-2.md\\:grid-cols-4 { display: grid !important; grid-template-columns: repeat(4,1fr) !important; }
 
           /* Risk & proceeds side by side */
-          .grid.grid-cols-1.lg\:grid-cols-2 { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+          .grid.grid-cols-1.lg\\:grid-cols-2 { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
 
           /* Color fixes */
           * { box-shadow: none !important; }
@@ -986,9 +990,9 @@ export default function App() {
           .text-gray-900 { color: #111827 !important; }
 
           /* Risk colors - preserve */
-          .bg-red-50, .dark\:bg-red-900\/30 { background: #fef2f2 !important; }
-          .bg-yellow-50, .dark\:bg-yellow-900\/30 { background: #fefce8 !important; }
-          .bg-green-50, .dark\:bg-green-900\/30 { background: #f0fdf4 !important; }
+          .bg-red-50, .dark\\:bg-red-900\\/30 { background: #fef2f2 !important; }
+          .bg-yellow-50, .dark\\:bg-yellow-900\\/30 { background: #fefce8 !important; }
+          .bg-green-50, .dark\\:bg-green-900\\/30 { background: #f0fdf4 !important; }
           .border-red-200 { border-color: #fecaca !important; }
           .border-yellow-200 { border-color: #fef08a !important; }
           .border-green-200 { border-color: #bbf7d0 !important; }
@@ -1640,352 +1644,373 @@ export default function App() {
               </div>
             </div>
 
-            {/* ── KPI SECTION dengan Year Filter ── */}
-            <div className="mb-8">
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
-                  {l.dash.kpi}
-                </h3>
-                {/* Year filter — hanya tampil jika ada multiple years */}
-                {D.financialYears && D.financialYears.length > 1 && (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm text-gray-500 dark:text-gray-400">
-                      {l.dash.year_filter}
-                    </span>
-                    <div className="flex gap-1.5 flex-wrap">
-                      {D.financialYears.map((yr) => {
-                        const isActive =
-                          kpiYear === yr ||
-                          (kpiYear === null &&
-                            yr ===
-                              D.financialYears[D.financialYears.length - 1]);
-                        return (
-                          <button
-                            key={yr}
-                            onClick={() =>
-                              setKpiYear(kpiYear === yr ? null : yr)
-                            }
-                            className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${isActive ? "bg-emerald-500 text-white shadow-sm" : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30"}`}
-                          >
-                            {yr}
-                          </button>
-                        );
-                      })}
+            {/* ── KPI SECTION - PRO ONLY ── */}
+            {D.isPro && (
+              <div className="mb-8">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+                  <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                    {l.dash.kpi}
+                  </h3>
+                  {/* Year filter — hanya tampil jika ada multiple years */}
+                  {D.financialYears && D.financialYears.length > 1 && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">
+                        {l.dash.year_filter}
+                      </span>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {D.financialYears.map((yr) => {
+                          const isActive =
+                            kpiYear === yr ||
+                            (kpiYear === null &&
+                              yr ===
+                                D.financialYears[D.financialYears.length - 1]);
+                          return (
+                            <button
+                              key={yr}
+                              onClick={() =>
+                                setKpiYear(kpiYear === yr ? null : yr)
+                              }
+                              className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${isActive ? "bg-emerald-500 text-white shadow-sm" : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30"}`}
+                            >
+                              {yr}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <span className="text-xs text-gray-400 dark:text-gray-500 italic">
+                        {lang === "EN"
+                          ? "* PE, PB, EPS based on IPO price"
+                          : "* PE, PB, EPS berdasarkan harga IPO"}
+                      </span>
                     </div>
-                    <span className="text-xs text-gray-400 dark:text-gray-500 italic">
-                      {lang === "EN"
-                        ? "* PE, PB, EPS based on IPO price"
-                        : "* PE, PB, EPS berdasarkan harga IPO"}
-                    </span>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                {(() => {
-                  const activeYear =
-                    kpiYear ||
-                    (D.financialYears?.length > 0
-                      ? D.financialYears[D.financialYears.length - 1]
-                      : null);
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                  {(() => {
+                    const activeYear =
+                      kpiYear ||
+                      (D.financialYears?.length > 0
+                        ? D.financialYears[D.financialYears.length - 1]
+                        : null);
 
-                  // Ambil nilai KPI per tahun jika ada (dari kpiByYear)
-                  const getYearVal = (field, fallback) => {
-                    if (!activeYear || !D.kpiByYear) return fallback;
-                    const yearData = D.kpiByYear[field];
-                    if (
-                      yearData &&
-                      typeof yearData === "object" &&
-                      !Array.isArray(yearData)
-                    ) {
-                      const v = yearData[activeYear];
-                      if (
-                        v !== undefined &&
-                        v !== null &&
-                        String(v).toUpperCase() !== "N/A"
-                      ) {
-                        const num = parseFloat(v);
-                        if (!isNaN(num)) {
-                          if (field === "roe_percent")
-                            return `${num.toFixed(1)}%`;
-                          if (field === "de_ratio") return `${num.toFixed(2)}x`;
-                          return String(v);
-                        }
-                      }
-                    }
-                    return fallback;
-                  };
+                    // Ambil nilai KPI per tahun dari roe_by_year / der_by_year / eps_by_year
+                    const getByYear = (key, suffix, fallback) => {
+                      if (!activeYear || !D.kpiByYear?.[key]) return fallback;
+                      const v = D.kpiByYear[key][activeYear];
+                      if (v === undefined || v === null) return fallback;
+                      const num = parseFloat(v);
+                      if (isNaN(num)) return fallback;
+                      if (suffix === "%") return `${num.toFixed(2)}%`;
+                      if (suffix === "x") return `${num.toFixed(2)}x`;
+                      if (suffix === "rp")
+                        return `Rp ${num.toLocaleString("id-ID")}`;
+                      return String(v);
+                    };
 
-                  const cards = [
-                    {
-                      label: l.dash.pe,
-                      val: D.kpi.pe,
-                      color: "text-blue-600 dark:text-blue-400",
-                      bg: "bg-blue-50 dark:bg-blue-900/20",
-                      note: lang === "EN" ? "At IPO price" : "Pada harga IPO",
-                    },
-                    {
-                      label: l.dash.pb,
-                      val: D.kpi.pb,
-                      color: "text-purple-600 dark:text-purple-400",
-                      bg: "bg-purple-50 dark:bg-purple-900/20",
-                      note: lang === "EN" ? "At IPO price" : "Pada harga IPO",
-                    },
-                    {
-                      label: l.dash.roe,
-                      val: getYearVal("roe_percent", D.kpi.roe),
-                      color: "text-emerald-600 dark:text-emerald-400",
-                      bg: "bg-emerald-50 dark:bg-emerald-900/20",
-                      note: activeYear || "",
-                    },
-                    {
-                      label: l.dash.der,
-                      val: getYearVal("de_ratio", D.kpi.der),
-                      color: "text-orange-600 dark:text-orange-400",
-                      bg: "bg-orange-50 dark:bg-orange-900/20",
-                      note: activeYear || "",
-                    },
-                    {
-                      label: l.dash.eps,
-                      val: D.kpi.eps,
-                      color: "text-cyan-600 dark:text-cyan-400",
-                      bg: "bg-cyan-50 dark:bg-cyan-900/20",
-                      note: lang === "EN" ? "Latest year" : "Tahun terakhir",
-                    },
-                    {
-                      label: l.dash.mktcap,
-                      val: D.kpi.mktcap || D.company.marketCap,
-                      color: "text-rose-600 dark:text-rose-400",
-                      bg: "bg-rose-50 dark:bg-rose-900/20",
-                      note: lang === "EN" ? "At IPO price" : "Pada harga IPO",
-                    },
-                  ];
+                    const cards = [
+                      {
+                        label: l.dash.pe,
+                        val: D.kpi.pe,
+                        color: "text-blue-600 dark:text-blue-400",
+                        bg: "bg-blue-50 dark:bg-blue-900/20",
+                        note: lang === "EN" ? "At IPO price" : "Pada harga IPO",
+                      },
+                      {
+                        label: l.dash.pb,
+                        val: D.kpi.pb,
+                        color: "text-purple-600 dark:text-purple-400",
+                        bg: "bg-purple-50 dark:bg-purple-900/20",
+                        note: lang === "EN" ? "At IPO price" : "Pada harga IPO",
+                      },
+                      {
+                        label: l.dash.roe,
+                        val: getByYear("roe", "%", D.kpi.roe),
+                        color: "text-emerald-600 dark:text-emerald-400",
+                        bg: "bg-emerald-50 dark:bg-emerald-900/20",
+                        note: activeYear || "",
+                      },
+                      {
+                        label: l.dash.der,
+                        val: getByYear("der", "x", D.kpi.der),
+                        color: "text-orange-600 dark:text-orange-400",
+                        bg: "bg-orange-50 dark:bg-orange-900/20",
+                        note: activeYear || "",
+                      },
+                      {
+                        label: l.dash.eps,
+                        val: getByYear("eps", "rp", D.kpi.eps),
+                        color: "text-cyan-600 dark:text-cyan-400",
+                        bg: "bg-cyan-50 dark:bg-cyan-900/20",
+                        note:
+                          activeYear ||
+                          (lang === "EN" ? "Latest year" : "Tahun terakhir"),
+                      },
+                      {
+                        label: l.dash.mktcap,
+                        val: D.kpi.mktcap || D.company.marketCap,
+                        color: "text-rose-600 dark:text-rose-400",
+                        bg: "bg-rose-50 dark:bg-rose-900/20",
+                        note: lang === "EN" ? "At IPO price" : "Pada harga IPO",
+                      },
+                    ];
 
-                  return cards.map((k, i) => (
-                    <div
-                      key={i}
-                      className={`${k.bg} rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm text-center`}
-                    >
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 font-medium">
-                        {k.label}
-                      </p>
-                      <p className={`text-xl font-bold ${k.color}`}>
-                        {k.val || "—"}
-                      </p>
-                      {k.note && (
-                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
-                          {k.note}
+                    return cards.map((k, i) => (
+                      <div
+                        key={i}
+                        className={`${k.bg} rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm text-center`}
+                      >
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 font-medium">
+                          {k.label}
                         </p>
-                      )}
-                    </div>
-                  ));
-                })()}
+                        <p className={`text-xl font-bold ${k.color}`}>
+                          {k.val || "—"}
+                        </p>
+                        {k.note && (
+                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
+                            {k.note}
+                          </p>
+                        )}
+                      </div>
+                    ));
+                  })()}
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Financial Charts */}
-            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-8 mb-8">
-              <div className="flex items-start justify-between mb-1">
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
-                  {l.dash.fin}
+            {/* ── BASIC: Upgrade CTA jika bukan Pro ── */}
+            {!D.isPro && (
+              <div className="mb-8 rounded-2xl border-2 border-dashed border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-900/10 p-8 text-center">
+                <Sparkles className="w-10 h-10 text-purple-400 mx-auto mb-3" />
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                  {lang === "EN"
+                    ? "KPI & Financial Highlights — Pro Feature"
+                    : "KPI & Sorotan Keuangan — Fitur Pro"}
                 </h3>
-                <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-3 py-1 rounded-full font-semibold">
-                  {D.financialTrends.revenue?.length || 0}{" "}
-                  {lang === "EN" ? "years data" : "tahun data"}
-                </span>
+                <p className="text-gray-500 dark:text-gray-400 mb-4 max-w-md mx-auto text-sm">
+                  {lang === "EN"
+                    ? "Upgrade to Pro to unlock Industry-Specific KPIs, Financial Highlights, Revenue/EBITDA Trends, and Advanced Risk Analysis using Gemini Pro."
+                    : "Upgrade ke Pro untuk membuka KPI Spesifik Industri, Sorotan Keuangan, Tren Revenue/EBITDA, dan Analisis Risiko Mendalam menggunakan Gemini Pro."}
+                </p>
+                <div className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-semibold text-sm transition-colors cursor-default opacity-80">
+                  <Sparkles className="w-4 h-4" />
+                  {lang === "EN"
+                    ? "Pro Plan · Rp 49.000/analysis"
+                    : "Paket Pro · Rp 49.000/analisis"}
+                </div>
               </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-                {l.dash.fin_sub}
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {[
-                  {
-                    title: l.dash.rev,
-                    data: D.financialTrends.revenue,
-                    color: "#10B981",
-                    trendKey: "revenue",
-                    note:
-                      lang === "EN"
-                        ? "YoY revenue growth · First year = 0 baseline"
-                        : "Pertumbuhan revenue YoY · Tahun pertama = 0",
-                  },
-                  {
-                    title: l.dash.gm,
-                    data: D.financialTrends.grossMargin,
-                    color: "#3B82F6",
-                    trendKey: "grossMargin",
-                    note:
-                      lang === "EN"
-                        ? "Gross Profit / Revenue × 100"
-                        : "Laba Kotor / Pendapatan × 100",
-                  },
-                  {
-                    title: l.dash.om,
-                    data: D.financialTrends.operatingMargin,
-                    color: "#F59E0B",
-                    trendKey: "operatingMargin",
-                    note:
-                      lang === "EN"
-                        ? "Operating Profit / Revenue × 100"
-                        : "Laba Usaha / Pendapatan × 100",
-                  },
-                  {
-                    title: l.dash.eb,
-                    data: D.financialTrends.ebitdaMargin,
-                    color: "#8B5CF6",
-                    trendKey: "ebitdaMargin",
-                    note:
-                      lang === "EN"
-                        ? "EBITDA / Revenue × 100"
-                        : "EBITDA / Pendapatan × 100",
-                  },
-                ].map((ch, i) => {
-                  const tag = D.trendTags?.[ch.trendKey];
-                  const valid =
-                    ch.data?.filter((x) => x.value !== null && x.value !== 0) ||
-                    [];
-                  const lastVal = valid.length
-                    ? valid[valid.length - 1]?.value
-                    : null;
-                  const avgVal = valid.length
-                    ? (
-                        valid.reduce((s, x) => s + x.value, 0) / valid.length
-                      ).toFixed(1)
-                    : null;
-                  const chartType =
-                    (ch.data?.length || 0) <= 1 ? "bar" : "line";
-                  if (!ch.data || ch.data.length === 0)
+            )}
+
+            {/* Financial Charts - PRO ONLY */}
+            {D.isPro && (
+              <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-8 mb-8">
+                <div className="flex items-start justify-between mb-1">
+                  <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                    {l.dash.fin}
+                  </h3>
+                  <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-3 py-1 rounded-full font-semibold">
+                    {D.financialTrends.revenue?.length || 0}{" "}
+                    {lang === "EN" ? "years data" : "tahun data"}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                  {l.dash.fin_sub}
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {[
+                    {
+                      title: l.dash.rev,
+                      data: D.financialTrends.revenue,
+                      color: "#10B981",
+                      trendKey: "revenue",
+                      note:
+                        lang === "EN"
+                          ? "YoY revenue growth · First year = 0 baseline"
+                          : "Pertumbuhan revenue YoY · Tahun pertama = 0",
+                    },
+                    {
+                      title: l.dash.gm,
+                      data: D.financialTrends.grossMargin,
+                      color: "#3B82F6",
+                      trendKey: "grossMargin",
+                      note:
+                        lang === "EN"
+                          ? "Gross Profit / Revenue × 100"
+                          : "Laba Kotor / Pendapatan × 100",
+                    },
+                    {
+                      title: l.dash.om,
+                      data: D.financialTrends.operatingMargin,
+                      color: "#F59E0B",
+                      trendKey: "operatingMargin",
+                      note:
+                        lang === "EN"
+                          ? "Operating Profit / Revenue × 100"
+                          : "Laba Usaha / Pendapatan × 100",
+                    },
+                    {
+                      title: l.dash.eb,
+                      data: D.financialTrends.ebitdaMargin,
+                      color: "#8B5CF6",
+                      trendKey: "ebitdaMargin",
+                      note:
+                        lang === "EN"
+                          ? "EBITDA / Revenue × 100"
+                          : "EBITDA / Pendapatan × 100",
+                    },
+                  ].map((ch, i) => {
+                    const tag = D.trendTags?.[ch.trendKey];
+                    const valid =
+                      ch.data?.filter(
+                        (x) => x.value !== null && x.value !== 0,
+                      ) || [];
+                    const lastVal = valid.length
+                      ? valid[valid.length - 1]?.value
+                      : null;
+                    const avgVal = valid.length
+                      ? (
+                          valid.reduce((s, x) => s + x.value, 0) / valid.length
+                        ).toFixed(1)
+                      : null;
+                    const chartType =
+                      (ch.data?.length || 0) <= 1 ? "bar" : "line";
+                    if (!ch.data || ch.data.length === 0)
+                      return (
+                        <div
+                          key={i}
+                          className="bg-gray-50 dark:bg-gray-800 rounded-xl p-6 border border-gray-100 dark:border-gray-700 flex items-center justify-center h-48"
+                        >
+                          <p className="text-gray-400 text-sm">
+                            {lang === "EN"
+                              ? "No data available"
+                              : "Data tidak tersedia"}
+                          </p>
+                        </div>
+                      );
                     return (
                       <div
                         key={i}
-                        className="bg-gray-50 dark:bg-gray-800 rounded-xl p-6 border border-gray-100 dark:border-gray-700 flex items-center justify-center h-48"
+                        className="bg-gray-50 dark:bg-gray-800 rounded-xl p-6 border border-gray-100 dark:border-gray-700"
                       >
-                        <p className="text-gray-400 text-sm">
-                          {lang === "EN"
-                            ? "No data available"
-                            : "Data tidak tersedia"}
+                        <div className="flex items-start justify-between mb-1">
+                          <h4 className="text-base font-semibold text-gray-900 dark:text-white">
+                            {ch.title}
+                          </h4>
+                          <div className="flex items-center gap-2">
+                            {tag && (
+                              <span
+                                className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${tag === "up" ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : tag === "down" ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"}`}
+                              >
+                                {tag === "up"
+                                  ? "↑"
+                                  : tag === "down"
+                                    ? "↓"
+                                    : "→"}
+                                {tag === "up"
+                                  ? l.dash.trend_up
+                                  : tag === "down"
+                                    ? l.dash.trend_down
+                                    : l.dash.trend_stable}
+                              </span>
+                            )}
+                            <span className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full font-mono font-bold">
+                              %
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mb-1 italic">
+                          {ch.note}
                         </p>
+                        {lastVal !== null && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                            <span className="font-semibold text-gray-700 dark:text-gray-300">
+                              {lastVal?.toFixed(2)}%
+                            </span>
+                            {lang === "EN" ? " latest" : " terkini"}
+                            {avgVal && (
+                              <>
+                                {" "}
+                                · <span>{avgVal}%</span>
+                                {lang === "EN" ? " avg" : " rata-rata"}
+                              </>
+                            )}
+                          </p>
+                        )}
+                        <ResponsiveContainer width="100%" height={200}>
+                          {chartType === "bar" ? (
+                            <BarChart data={ch.data}>
+                              <CartesianGrid
+                                strokeDasharray="3 3"
+                                stroke="#374151"
+                                opacity={0.2}
+                              />
+                              <XAxis
+                                dataKey="year"
+                                stroke="#9CA3AF"
+                                fontSize={12}
+                              />
+                              <YAxis
+                                stroke="#9CA3AF"
+                                fontSize={12}
+                                unit="%"
+                                domain={["auto", "auto"]}
+                                tickFormatter={(v) => `${v.toFixed(1)}`}
+                              />
+                              <Tooltip
+                                contentStyle={tt}
+                                formatter={(v) => [
+                                  `${Number(v).toFixed(2)}%`,
+                                  ch.title,
+                                ]}
+                              />
+                              <Bar
+                                dataKey="value"
+                                fill={ch.color}
+                                radius={[4, 4, 0, 0]}
+                              />
+                            </BarChart>
+                          ) : (
+                            <LineChart data={ch.data}>
+                              <CartesianGrid
+                                strokeDasharray="3 3"
+                                stroke="#374151"
+                                opacity={0.2}
+                              />
+                              <XAxis
+                                dataKey="year"
+                                stroke="#9CA3AF"
+                                fontSize={12}
+                              />
+                              <YAxis
+                                stroke="#9CA3AF"
+                                fontSize={12}
+                                unit="%"
+                                domain={["auto", "auto"]}
+                                tickFormatter={(v) => `${v.toFixed(1)}`}
+                              />
+                              <Tooltip
+                                contentStyle={tt}
+                                formatter={(v) => [
+                                  `${Number(v).toFixed(2)}%`,
+                                  ch.title,
+                                ]}
+                              />
+                              <Line
+                                type="monotone"
+                                dataKey="value"
+                                stroke={ch.color}
+                                strokeWidth={3}
+                                dot={{ fill: ch.color, r: 5, strokeWidth: 0 }}
+                              />
+                            </LineChart>
+                          )}
+                        </ResponsiveContainer>
                       </div>
                     );
-                  return (
-                    <div
-                      key={i}
-                      className="bg-gray-50 dark:bg-gray-800 rounded-xl p-6 border border-gray-100 dark:border-gray-700"
-                    >
-                      <div className="flex items-start justify-between mb-1">
-                        <h4 className="text-base font-semibold text-gray-900 dark:text-white">
-                          {ch.title}
-                        </h4>
-                        <div className="flex items-center gap-2">
-                          {tag && (
-                            <span
-                              className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${tag === "up" ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : tag === "down" ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"}`}
-                            >
-                              {tag === "up" ? "↑" : tag === "down" ? "↓" : "→"}
-                              {tag === "up"
-                                ? l.dash.trend_up
-                                : tag === "down"
-                                  ? l.dash.trend_down
-                                  : l.dash.trend_stable}
-                            </span>
-                          )}
-                          <span className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full font-mono font-bold">
-                            %
-                          </span>
-                        </div>
-                      </div>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mb-1 italic">
-                        {ch.note}
-                      </p>
-                      {lastVal !== null && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                          <span className="font-semibold text-gray-700 dark:text-gray-300">
-                            {lastVal?.toFixed(2)}%
-                          </span>
-                          {lang === "EN" ? " latest" : " terkini"}
-                          {avgVal && (
-                            <>
-                              {" "}
-                              · <span>{avgVal}%</span>
-                              {lang === "EN" ? " avg" : " rata-rata"}
-                            </>
-                          )}
-                        </p>
-                      )}
-                      <ResponsiveContainer width="100%" height={200}>
-                        {chartType === "bar" ? (
-                          <BarChart data={ch.data}>
-                            <CartesianGrid
-                              strokeDasharray="3 3"
-                              stroke="#374151"
-                              opacity={0.2}
-                            />
-                            <XAxis
-                              dataKey="year"
-                              stroke="#9CA3AF"
-                              fontSize={12}
-                            />
-                            <YAxis
-                              stroke="#9CA3AF"
-                              fontSize={12}
-                              unit="%"
-                              domain={["auto", "auto"]}
-                              tickFormatter={(v) => `${v.toFixed(1)}`}
-                            />
-                            <Tooltip
-                              contentStyle={tt}
-                              formatter={(v) => [
-                                `${Number(v).toFixed(2)}%`,
-                                ch.title,
-                              ]}
-                            />
-                            <Bar
-                              dataKey="value"
-                              fill={ch.color}
-                              radius={[4, 4, 0, 0]}
-                            />
-                          </BarChart>
-                        ) : (
-                          <LineChart data={ch.data}>
-                            <CartesianGrid
-                              strokeDasharray="3 3"
-                              stroke="#374151"
-                              opacity={0.2}
-                            />
-                            <XAxis
-                              dataKey="year"
-                              stroke="#9CA3AF"
-                              fontSize={12}
-                            />
-                            <YAxis
-                              stroke="#9CA3AF"
-                              fontSize={12}
-                              unit="%"
-                              domain={["auto", "auto"]}
-                              tickFormatter={(v) => `${v.toFixed(1)}`}
-                            />
-                            <Tooltip
-                              contentStyle={tt}
-                              formatter={(v) => [
-                                `${Number(v).toFixed(2)}%`,
-                                ch.title,
-                              ]}
-                            />
-                            <Line
-                              type="monotone"
-                              dataKey="value"
-                              stroke={ch.color}
-                              strokeWidth={3}
-                              dot={{ fill: ch.color, r: 5, strokeWidth: 0 }}
-                            />
-                          </LineChart>
-                        )}
-                      </ResponsiveContainer>
-                    </div>
-                  );
-                })}
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Use of Proceeds + Risk & Benefits */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
@@ -2291,7 +2316,10 @@ export default function App() {
                       {l.dash.rf}
                     </h4>
                     <div className="space-y-3">
-                      {D.riskFactors.map((r, i) => {
+                      {(D.isPro
+                        ? D.riskFactors
+                        : D.riskFactors.slice(0, 4)
+                      ).map((r, i) => {
                         const level = r.level || "Medium";
                         const title = r.title || r;
                         const levelIcon =
@@ -2314,8 +2342,13 @@ export default function App() {
                               <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
                                 {title}
                               </span>
+                              {!D.isPro && (
+                                <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 font-normal">
+                                  Standard
+                                </span>
+                              )}
                             </div>
-                            {r.desc && (
+                            {D.isPro && r.desc && (
                               <div
                                 className={`px-4 py-3 border-t ${
                                   level === "High"
@@ -2333,6 +2366,14 @@ export default function App() {
                           </div>
                         );
                       })}
+                      {!D.isPro && D.riskFactors.length > 4 && (
+                        <p className="text-xs text-center text-gray-400 dark:text-gray-500 py-2">
+                          +{D.riskFactors.length - 4}{" "}
+                          {lang === "EN"
+                            ? "more risks in Pro plan"
+                            : "risiko lagi di paket Pro"}
+                        </p>
+                      )}
                     </div>
                   </div>
                   {/* Benefits */}
