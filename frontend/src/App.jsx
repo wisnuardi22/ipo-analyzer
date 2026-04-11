@@ -40,6 +40,7 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  LabelList,
   ResponsiveContainer,
   PieChart,
   Pie,
@@ -723,6 +724,7 @@ const _buildMapped = (d) => {
       grossMargin: normFinancial(finData.gross_margin) || [],
       operatingMargin: normFinancial(finData.operating_margin) || [],
       ebitdaMargin: normFinancial(finData.ebitda_margin) || [],
+      netProfitMargin: normFinancial(finData.net_profit_margin) || [],
     },
     trendTags: {
       revenue: trendTag(normFinancial(finData.revenue_growth)),
@@ -775,7 +777,8 @@ export default function App() {
   const [loginErr, setLoginErr] = useState("");
   // ── NEW STATES ──
   const [analysisId, setAnalysisId] = useState(null);
-  const [kpiYear, setKpiYear] = useState(null); // null = tahun terakhir (default)
+  const [kpiYear, setKpiYear] = useState(null);
+  // null = tahun terakhir (default)
 
   const tvSymbolRef = useRef(null);
   const tvMiniChartRef = useRef(null);
@@ -892,22 +895,11 @@ export default function App() {
   };
 
   // ── HANDLE LANG CHANGE — re-analyze jika dashboard sudah tampil ──
-  const handleLangChange = async (newLang) => {
+  const handleLangChange = (newLang) => {
+    // Hanya ganti bahasa UI - TIDAK re-analyze (hemat token LLM)
     setLang(newLang);
-    if (!ready || !analysisId) return;
-    try {
-      setStatus(newLang === "EN" ? "Translating..." : "Menerjemahkan...");
-      await axios.post(`${API_BASE}/analyze/${analysisId}`, {
-        lang: newLang,
-        plan: data?.plan || "basic",
-      });
-      const res = await axios.get(`${API_BASE}/analysis/${analysisId}`);
-      setData(_buildMapped(res.data));
-      setKpiYear(null);
-      setStatus("");
-    } catch (e) {
-      setStatus("Error: " + (e.response?.data?.detail || e.message));
-    }
+    // Reset status jika ada
+    if (status) setStatus("");
   };
 
   const handlePrint = () => {
@@ -979,30 +971,30 @@ export default function App() {
 
           /* Company header block */
           .company-header-block { margin-bottom: 10px !important; padding: 10px 14px !important; }
-
+          
           /* Prevent orphan sections */
           .rounded-2xl, .rounded-xl { border-radius: 8px !important; }
 
           /* Grid layouts for landscape */
-          .grid.grid-cols-1.lg\\:grid-cols-2 {
-            display: grid !important;
-            grid-template-columns: 1fr 1fr !important;
-            gap: 10px !important;
+          .grid.grid-cols-1.lg\\:grid-cols-2 { 
+            display: grid !important; 
+            grid-template-columns: 1fr 1fr !important; 
+            gap: 10px !important; 
           }
-          .grid.grid-cols-2.md\\:grid-cols-4 {
-            display: grid !important;
-            grid-template-columns: repeat(4, 1fr) !important;
-            gap: 8px !important;
+          .grid.grid-cols-2.md\\:grid-cols-4 { 
+            display: grid !important; 
+            grid-template-columns: repeat(4, 1fr) !important; 
+            gap: 8px !important; 
           }
-          .grid.grid-cols-2.md\\:grid-cols-3.lg\\:grid-cols-6 {
-            display: grid !important;
-            grid-template-columns: repeat(6, 1fr) !important;
-            gap: 6px !important;
+          .grid.grid-cols-2.md\\:grid-cols-3.lg\\:grid-cols-6 { 
+            display: grid !important; 
+            grid-template-columns: repeat(6, 1fr) !important; 
+            gap: 6px !important; 
           }
-          .grid.grid-cols-1.md\\:grid-cols-2 {
-            display: grid !important;
-            grid-template-columns: 1fr 1fr !important;
-            gap: 8px !important;
+          .grid.grid-cols-1.md\\:grid-cols-2 { 
+            display: grid !important; 
+            grid-template-columns: 1fr 1fr !important; 
+            gap: 8px !important; 
           }
 
           /* Page breaks */
@@ -1014,7 +1006,7 @@ export default function App() {
 
           /* KPI section break before page 2 */
           .kpi-section-print { page-break-before: always !important; break-before: page !important; }
-
+          
           /* Prevent cuts inside components */
           .recharts-wrapper { page-break-inside: avoid !important; break-inside: avoid !important; }
           .rounded-xl { page-break-inside: avoid !important; break-inside: avoid !important; }
@@ -1770,7 +1762,10 @@ export default function App() {
                       },
                       {
                         label: l.dash.der,
-                        val: getByYear("der", "x", D.kpi.der),
+                        val:
+                          getByYear("der", "x", D.kpi.der) !== "N/A"
+                            ? getByYear("der", "x", D.kpi.der)
+                            : D.kpi.der || "N/A",
                         color: "text-orange-600 dark:text-orange-400",
                         bg: "bg-orange-50 dark:bg-orange-900/20",
                         note: activeYear || "",
@@ -1909,14 +1904,29 @@ export default function App() {
                           : "Pertumbuhan revenue YoY · Tahun pertama = 0",
                     },
                     {
-                      title: l.dash.gm,
-                      data: D.financialTrends.grossMargin,
+                      title: D.financialTrends.grossMargin?.some?.(
+                        (x) => x.value !== null && x.value !== undefined,
+                      )
+                        ? l.dash.gm
+                        : lang === "EN"
+                          ? "Net Profit Margin (%)"
+                          : "Margin Laba Bersih (%)",
+                      data: D.financialTrends.grossMargin?.some?.(
+                        (x) => x.value !== null && x.value !== undefined,
+                      )
+                        ? D.financialTrends.grossMargin
+                        : D.financialTrends.netProfitMargin,
                       color: "#3B82F6",
                       trendKey: "grossMargin",
-                      note:
-                        lang === "EN"
+                      note: D.financialTrends.grossMargin?.some?.(
+                        (x) => x.value !== null && x.value !== undefined,
+                      )
+                        ? lang === "EN"
                           ? "Gross Profit / Revenue × 100"
-                          : "Laba Kotor / Pendapatan × 100",
+                          : "Laba Kotor / Pendapatan × 100"
+                        : lang === "EN"
+                          ? "Net Profit / Revenue × 100"
+                          : "Laba Bersih / Pendapatan × 100",
                     },
                     {
                       title: l.dash.om,
@@ -2016,9 +2026,17 @@ export default function App() {
                             )}
                           </p>
                         )}
-                        <ResponsiveContainer width="100%" height={200}>
+                        <ResponsiveContainer width="100%" height={220}>
                           {chartType === "bar" ? (
-                            <BarChart data={ch.data}>
+                            <BarChart
+                              data={ch.data}
+                              margin={{
+                                top: 20,
+                                right: 10,
+                                left: 0,
+                                bottom: 0,
+                              }}
+                            >
                               <CartesianGrid
                                 strokeDasharray="3 3"
                                 stroke="#374151"
@@ -2027,14 +2045,17 @@ export default function App() {
                               <XAxis
                                 dataKey="year"
                                 stroke="#9CA3AF"
-                                fontSize={12}
+                                fontSize={11}
                               />
                               <YAxis
                                 stroke="#9CA3AF"
-                                fontSize={12}
+                                fontSize={11}
                                 unit="%"
                                 domain={["auto", "auto"]}
-                                tickFormatter={(v) => `${v.toFixed(1)}`}
+                                tickFormatter={(v) =>
+                                  `${parseFloat(v).toFixed(0)}`
+                                }
+                                width={42}
                               />
                               <Tooltip
                                 contentStyle={tt}
@@ -2047,10 +2068,33 @@ export default function App() {
                                 dataKey="value"
                                 fill={ch.color}
                                 radius={[4, 4, 0, 0]}
-                              />
+                              >
+                                <LabelList
+                                  dataKey="value"
+                                  position="top"
+                                  formatter={(v) =>
+                                    v !== null && v !== undefined
+                                      ? `${Number(v).toFixed(1)}%`
+                                      : ""
+                                  }
+                                  style={{
+                                    fill: ch.color,
+                                    fontSize: 10,
+                                    fontWeight: 600,
+                                  }}
+                                />
+                              </Bar>
                             </BarChart>
                           ) : (
-                            <LineChart data={ch.data}>
+                            <LineChart
+                              data={ch.data}
+                              margin={{
+                                top: 20,
+                                right: 10,
+                                left: 0,
+                                bottom: 0,
+                              }}
+                            >
                               <CartesianGrid
                                 strokeDasharray="3 3"
                                 stroke="#374151"
@@ -2059,14 +2103,17 @@ export default function App() {
                               <XAxis
                                 dataKey="year"
                                 stroke="#9CA3AF"
-                                fontSize={12}
+                                fontSize={11}
                               />
                               <YAxis
                                 stroke="#9CA3AF"
-                                fontSize={12}
+                                fontSize={11}
                                 unit="%"
                                 domain={["auto", "auto"]}
-                                tickFormatter={(v) => `${v.toFixed(1)}`}
+                                tickFormatter={(v) =>
+                                  `${parseFloat(v).toFixed(0)}`
+                                }
+                                width={42}
                               />
                               <Tooltip
                                 contentStyle={tt}
@@ -2079,9 +2126,24 @@ export default function App() {
                                 type="monotone"
                                 dataKey="value"
                                 stroke={ch.color}
-                                strokeWidth={3}
-                                dot={{ fill: ch.color, r: 5, strokeWidth: 0 }}
-                              />
+                                strokeWidth={2.5}
+                                dot={{ fill: ch.color, r: 4, strokeWidth: 0 }}
+                              >
+                                <LabelList
+                                  dataKey="value"
+                                  position="top"
+                                  formatter={(v) =>
+                                    v !== null && v !== undefined
+                                      ? `${Number(v).toFixed(1)}%`
+                                      : ""
+                                  }
+                                  style={{
+                                    fill: ch.color,
+                                    fontSize: 10,
+                                    fontWeight: 600,
+                                  }}
+                                />
+                              </Line>
                             </LineChart>
                           )}
                         </ResponsiveContainer>

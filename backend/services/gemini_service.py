@@ -373,31 +373,50 @@ def normalize_and_compute(fin_raw, fx_rate, is_banking=False):
     return financial, kpi
 
 # ── RISK SCORING LOGIC ────────────────────────────────────────────────
-_RISK_HIGH_KEYWORDS = [
-    "ketergantungan","konsentrasi","pelanggan utama","satu pelanggan",
-    "perizinan","regulasi otoritas","pencabutan izin","sanksi",
-    "gagal bayar","kredit bermasalah","npl tinggi","modal minimum",
-    "akuisisi tidak selesai","status pma","perubahan status",
-    "fraud","penipuan","keamanan data","siber","kebocoran data",
-    "rugi bersih","kerugian material","going concern",
-    "customer concentration","regulatory","license revocation",
-    "data breach","cyber attack","material loss",
+# Kata kunci yang MENENTUKAN level High (risiko sangat material)
+_RISK_HIGH_EXACT = [
+    "pencabutan izin","license revocation","going concern","gagal bayar",
+    "pailit","bangkrut","tidak dapat melanjutkan","satu pelanggan menyumbang",
+    "konsentrasi pelanggan","perubahan status pma","akuisisi tidak dapat",
+    "kerugian material yang signifikan","sanksi ojk","pembekuan",
 ]
-_RISK_LOW_KEYWORDS = [
-    "fluktuasi nilai tukar","perubahan kecil","minor","terbatas",
-    "tidak material","dampak minimal","risiko umum","pasar modal",
-    "harga saham","likuiditas saham","volatilitas",
-    "exchange rate","minor impact","general market",
+# Kata kunci yang menunjukkan risiko Medium (signifikan tapi manageable)
+_RISK_MEDIUM_EXACT = [
+    "ketergantungan","persaingan","kompetisi","perubahan regulasi","teknologi baru",
+    "sumber daya manusia","tenaga kerja","volatilitas harga","fluktuasi permintaan",
+    "risiko operasional","sistem informasi","kegagalan sistem","pihak ketiga",
+    "keamanan data","serangan siber","reputasi","likuiditas perusahaan",
+]
+# Kata kunci yang menunjukkan risiko Low (umum/minor)
+_RISK_LOW_EXACT = [
+    "fluktuasi nilai tukar","harga saham","likuiditas saham","pasar modal umum",
+    "kondisi ekonomi makro","force majeure","bencana alam","pandemi",
+    "perubahan selera","risiko umum industri","volatilitas pasar saham",
+    "exchange rate","share price volatility","general market conditions",
 ]
 
-def score_risk(title, desc):
-    """Tentukan level risiko berdasarkan konten, bukan hanya kata LLM."""
-    text = (title + " " + desc).lower()
-    high_score = sum(1 for k in _RISK_HIGH_KEYWORDS if k in text)
-    low_score  = sum(1 for k in _RISK_LOW_KEYWORDS if k in text)
-    if high_score >= 2: return "High"
-    if low_score >= 2:  return "Low"
-    if high_score == 1: return "Medium"
+def score_risk(title: str, desc: str) -> str:
+    """
+    Tentukan level risiko berdasarkan analisis konten yang nuanced.
+    Menggunakan hierarki: High > Medium > Low berdasarkan dampak bisnis nyata.
+    """
+    text = (title + " " + (desc or "")).lower()
+
+    # Cek High dulu - hanya jika ada kata kunci SANGAT spesifik
+    high_count = sum(1 for k in _RISK_HIGH_EXACT if k in text)
+    if high_count >= 1:
+        return "High"
+
+    # Cek Low - risiko generik/minor
+    low_count = sum(1 for k in _RISK_LOW_EXACT if k in text)
+    medium_count = sum(1 for k in _RISK_MEDIUM_EXACT if k in text)
+
+    if low_count >= 2 and medium_count == 0:
+        return "Low"
+    if low_count >= 1 and medium_count == 0 and high_count == 0:
+        return "Low"
+
+    # Default Medium untuk risiko operasional umum
     return "Medium"
 
 # ── LLM QUALITATIVE ───────────────────────────────────────────────────
@@ -431,23 +450,55 @@ DO NOT use generic descriptions. Every prospectus has unique use of proceeds."""
 
     # Risk detail
     if is_pro:
-        risk_instr = """risks: Find 'Faktor Risiko'/'Risk Factors'. Extract 5-7 risks.
-IMPORTANT - Assign level based on actual impact:
-- "High": material risk that could threaten business survival or major revenue loss (e.g. license revocation, customer concentration >50%, going concern doubt)
-- "Medium": significant but manageable operational/financial risk (e.g. technology dependency, competition, regulatory changes)  
-- "Low": minor/market-general risks (e.g. share price volatility, minor FX exposure, general market conditions)
-Each risk: level (High/Medium/Low), title (exact from doc), desc (2-3 sentences with specific data/percentages)
-overall_risk_level: aggregate assessment. overall_risk_reason: 3 sentences with specific facts."""
+        risk_instr = """risks: Find chapter 'Faktor Risiko' / 'Risk Factors'. Extract 5-7 most important risks.
+
+CRITICAL - Level assignment (assess each risk INDIVIDUALLY based on actual business impact):
+- "High": ONLY risks that could directly threaten survival or cause >30% revenue loss
+  → Customer concentration (single customer >40% revenue)
+  → License/permit revocation risk
+  → Going concern doubt
+  → Material fraud/data breach with criminal exposure
+  → Acquisition failure that changes core business model
+- "Medium": Significant but manageable risks with mitigation options
+  → Technology/system failures, cybersecurity (without criminal exposure)
+  → Key personnel dependency
+  → Regulatory changes that require adaptation (not license loss)
+  → Credit risk, NPL increases
+  → Competition and market share pressure
+  → Third-party/vendor dependency
+- "Low": Standard risks present in most businesses
+  → Share price / market liquidity risks
+  → General FX exposure on small % of revenue
+  → Macroeconomic/interest rate general exposure
+  → Natural disasters, pandemics (standard force majeure)
+  → General market competition (industry-wide)
+
+IMPORTANT: A healthy company with normal operations should have mostly Medium risks.
+DO NOT assign High to every risk - most operational risks are Medium.
+Each prospectus has a UNIQUE risk profile - reflect it accurately.
+
+Each: level (High/Medium/Low), title (exact from doc), desc (2-3 sentences with specific percentages/amounts from document)
+overall_risk_level: High ONLY if 2+ genuine High risks exist, otherwise Medium or Low
+overall_risk_reason: 3 sentences with specific financial facts from this prospectus"""
         benefit_instr = """benefits: Find 'Keunggulan Kompetitif'/'Competitive Strengths'. Extract 5-7 items.
 Each: title (exact from doc), desc (2-3 sentences with specific numbers/market share)"""
     else:
-        risk_instr = """risks: Find 'Faktor Risiko'. Extract 4-5 main risks.
-Assign level based on actual impact severity:
-- "High": could threaten core business operations or major revenue
-- "Medium": significant but manageable risk  
-- "Low": minor/general market risk
-Each: level (High/Medium/Low), title (exact name), desc (1 sentence)
-overall_risk_level: High/Medium/Low. overall_risk_reason: 2 sentences."""
+        risk_instr = """risks: Find chapter 'Faktor Risiko' / 'Risk Factors'. Extract 4-5 main risks.
+
+CRITICAL - Level assignment rules (MUST follow strictly):
+- "High": ONLY if risk could directly threaten business survival, lose >30% revenue, or trigger license revocation
+  Examples: single customer = 60%+ revenue, license at risk, going concern doubt, fraud/data breach with criminal liability
+- "Medium": Significant operational/financial risk that is manageable with mitigation
+  Examples: technology dependency, competition, regulatory changes, key person risk, credit risk
+- "Low": General market/minor risks with limited direct business impact
+  Examples: share price volatility, general FX exposure <5%, macroeconomic conditions, natural disasters
+
+IMPORTANT: Most IPO risks are Medium. Only use High if truly material. Use Low for standard market risks.
+NOT every prospectus should have the same risk profile - assess each one uniquely based on its actual risk factors.
+
+Each: level (High/Medium/Low), title (exact from doc), desc (1 sentence)
+overall_risk_level: should reflect weighted assessment, NOT always High.
+overall_risk_reason: 2 sentences with specific facts from this prospectus."""
         benefit_instr = """benefits: Find 'Keunggulan Kompetitif'. Extract 3-4 main strengths.
 Each: title (exact from doc), desc (1 sentence with key number)"""
 
