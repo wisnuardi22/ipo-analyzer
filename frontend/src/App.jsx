@@ -715,6 +715,7 @@ const _buildMapped = (d) => {
       roe: kpiData.roe_by_year || {},
       der: kpiData.der_by_year || {},
       eps: kpiData.eps_by_year || {},
+      extra: kpiData.extra_by_year || {},
     },
     financialYears: finData.years || [],
     financialTrends: {
@@ -774,8 +775,7 @@ export default function App() {
   const [loginErr, setLoginErr] = useState("");
   // ── NEW STATES ──
   const [analysisId, setAnalysisId] = useState(null);
-  const [kpiYear, setKpiYear] = useState(null);
-  // null = tahun terakhir (default)
+  const [kpiYear, setKpiYear] = useState(null); // null = tahun terakhir (default)
 
   const tvSymbolRef = useRef(null);
   const tvMiniChartRef = useRef(null);
@@ -957,62 +957,96 @@ export default function App() {
     >
       <style>{`
         @media print {
-          @page { size: A4 landscape; margin: 10mm; }
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; font-size: 11px; }
-          header, #service, #about, #contact, footer, button { display: none !important; }
-          #dashboard { display: block !important; padding: 0 !important; }
-          section#dashboard { padding: 0 !important; }
-          .max-w-7xl { max-width: 100% !important; padding: 0 !important; }
+          @page { size: A4 landscape; margin: 12mm 14mm; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-shadow: none !important; }
 
-          /* Prevent cutting */
-          .rounded-2xl, .rounded-xl { page-break-inside: avoid; break-inside: avoid; }
-          .grid { page-break-inside: avoid; break-inside: avoid; }
-          .recharts-wrapper, .recharts-responsive-container { page-break-inside: avoid; break-inside: avoid; }
+          /* Hide everything except dashboard */
+          header, footer, nav, #service, #about, #contact, button, .no-print,
+          [id="home"] > *:not(#dashboard-wrapper) { display: none !important; }
+          body { background: white !important; font-size: 10px; }
 
-          /* Financial charts - 2 per row landscape */
-          .grid.grid-cols-1.md\\:grid-cols-2 { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+          /* Reset container */
+          .max-w-7xl { max-width: 100% !important; padding: 0 !important; margin: 0 !important; }
+          section { padding: 0 !important; background: white !important; }
 
-          /* KPI cards - all in one row */
-          .grid.grid-cols-2.md\\:grid-cols-3.lg\\:grid-cols-6 { display: grid !important; grid-template-columns: repeat(6,1fr) !important; gap: 6px !important; }
+          /* ── HALAMAN 1: Header + Info IPO + About + UoF + Risk/Benefit ── */
+          /* ── HALAMAN 2: KPI + Financial Charts ── */
 
-          /* IPO summary - 4 col */
-          .grid.grid-cols-2.md\\:grid-cols-4 { display: grid !important; grid-template-columns: repeat(4,1fr) !important; }
+          /* Print header */
+          .print-header { display: flex !important; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 2px solid #1e293b; }
+          .print-logo { font-size: 14px; font-weight: 800; color: #1e293b; }
+          .print-date { font-size: 9px; color: #64748b; }
 
-          /* Risk & proceeds side by side */
-          .grid.grid-cols-1.lg\\:grid-cols-2 { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+          /* Company header block */
+          .company-header-block { margin-bottom: 10px !important; padding: 10px 14px !important; }
 
-          /* Color fixes */
-          * { box-shadow: none !important; }
-          .bg-slate-900, .bg-slate-800, .bg-gray-900 { background: #1e293b !important; }
-          .bg-slate-50, .bg-gray-50 { background: #f8fafc !important; }
+          /* Prevent orphan sections */
+          .rounded-2xl, .rounded-xl { border-radius: 8px !important; }
+
+          /* Grid layouts for landscape */
+          .grid.grid-cols-1.lg\\:grid-cols-2 {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            gap: 10px !important;
+          }
+          .grid.grid-cols-2.md\\:grid-cols-4 {
+            display: grid !important;
+            grid-template-columns: repeat(4, 1fr) !important;
+            gap: 8px !important;
+          }
+          .grid.grid-cols-2.md\\:grid-cols-3.lg\\:grid-cols-6 {
+            display: grid !important;
+            grid-template-columns: repeat(6, 1fr) !important;
+            gap: 6px !important;
+          }
+          .grid.grid-cols-1.md\\:grid-cols-2 {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            gap: 8px !important;
+          }
+
+          /* Page breaks */
+          .mb-8 { margin-bottom: 8px !important; }
+          .mb-6 { margin-bottom: 6px !important; }
+          .p-8 { padding: 10px !important; }
+          .p-6 { padding: 8px !important; }
+          .p-5 { padding: 6px !important; }
+
+          /* KPI section break before page 2 */
+          .kpi-section-print { page-break-before: always !important; break-before: page !important; }
+
+          /* Prevent cuts inside components */
+          .recharts-wrapper { page-break-inside: avoid !important; break-inside: avoid !important; }
+          .rounded-xl { page-break-inside: avoid !important; break-inside: avoid !important; }
+
+          /* Colors */
+          .bg-slate-900, .bg-slate-800, .bg-gray-800, .bg-gray-900 { background: #1e293b !important; }
           .bg-white { background: white !important; }
+          .bg-gray-50, .bg-slate-50 { background: #f8fafc !important; }
           .text-white { color: white !important; }
-          .text-gray-900 { color: #111827 !important; }
+          .text-gray-900, .dark\\:text-white { color: #111827 !important; }
+          .text-gray-500, .text-gray-400, .text-gray-300 { color: #6b7280 !important; }
+          .text-emerald-600, .text-emerald-400 { color: #059669 !important; }
+          .text-red-600 { color: #dc2626 !important; }
+          .text-yellow-600 { color: #d97706 !important; }
+          .text-green-600 { color: #16a34a !important; }
+          .text-blue-600 { color: #2563eb !important; }
+          .text-purple-600 { color: #9333ea !important; }
 
-          /* Risk colors - preserve */
-          .bg-red-50, .dark\\:bg-red-900\\/30 { background: #fef2f2 !important; }
-          .bg-yellow-50, .dark\\:bg-yellow-900\\/30 { background: #fefce8 !important; }
-          .bg-green-50, .dark\\:bg-green-900\\/30 { background: #f0fdf4 !important; }
+          /* Risk colors */
+          .bg-red-50 { background: #fef2f2 !important; }
+          .bg-yellow-50 { background: #fefce8 !important; }
+          .bg-green-50 { background: #f0fdf4 !important; }
+          .bg-emerald-50 { background: #ecfdf5 !important; }
           .border-red-200 { border-color: #fecaca !important; }
           .border-yellow-200 { border-color: #fef08a !important; }
           .border-green-200 { border-color: #bbf7d0 !important; }
-          .text-red-600 { color: #dc2626 !important; }
-          .text-yellow-600 { color: #ca8a04 !important; }
-          .text-green-600 { color: #16a34a !important; }
-          .text-emerald-600, .text-emerald-400 { color: #059669 !important; }
+          .border-emerald-200 { border-color: #a7f3d0 !important; }
 
-          /* Reduce spacing */
-          .mb-8 { margin-bottom: 8px !important; }
-          .mb-6 { margin-bottom: 6px !important; }
-          .p-8 { padding: 12px !important; }
-          .p-6 { padding: 10px !important; }
-          .p-5 { padding: 8px !important; }
-          .py-20 { padding-top: 8px !important; padding-bottom: 8px !important; }
-
-          h2 { font-size: 16px !important; }
-          h3 { font-size: 14px !important; }
-          h4 { font-size: 12px !important; }
-          p, span, div { font-size: 11px !important; }
+          h2 { font-size: 14px !important; font-weight: 700; margin-bottom: 6px; }
+          h3 { font-size: 13px !important; font-weight: 700; margin-bottom: 4px; }
+          h4 { font-size: 11px !important; font-weight: 600; margin-bottom: 4px; }
+          p, span, div { font-size: 10px !important; }
         }
       `}</style>
 
@@ -1637,16 +1671,16 @@ export default function App() {
               <h4 className="text-base font-semibold text-gray-700 dark:text-gray-300 mb-3">
                 {l.dash.about_co}
               </h4>
-              <div className="text-gray-700 dark:text-gray-300 leading-relaxed space-y-3">
-                {D.company.description?.split("\n\n").map((para, i) => (
-                  <p key={i}>{para}</p>
-                ))}
-              </div>
+              <p className="text-gray-700 dark:text-gray-300 leading-relaxed text-sm">
+                {D.company.description?.split("\n\n")[0] ||
+                  D.company.description ||
+                  ""}
+              </p>
             </div>
 
-            {/* ── KPI SECTION - PRO ONLY ── */}
+            {/* ── KPI SECTION - PRO ONLY (Page 2 on print) ── */}
             {D.isPro && (
-              <div className="mb-8">
+              <div className="mb-8 kpi-section-print">
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
                   <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
                     {l.dash.kpi}
@@ -1704,9 +1738,13 @@ export default function App() {
                       if (suffix === "%") return `${num.toFixed(2)}%`;
                       if (suffix === "x") return `${num.toFixed(2)}x`;
                       if (suffix === "rp")
-                        return `Rp ${num.toLocaleString("id-ID")}`;
+                        return `Rp ${Math.abs(num).toLocaleString("id-ID", { minimumFractionDigits: 2 })}`;
                       return String(v);
                     };
+                    // Extra KPI untuk bank (CAR, NPL, NIM, BOPO)
+                    const extraKpi = activeYear
+                      ? D.kpiByYear?.extra?.[activeYear] || {}
+                      : {};
 
                     const cards = [
                       {
@@ -1755,7 +1793,49 @@ export default function App() {
                       },
                     ];
 
-                    return cards.map((k, i) => (
+                    // Extra bank KPI cards jika ada data
+                    const extraCards =
+                      Object.keys(extraKpi).length > 0
+                        ? [
+                            extraKpi.nim !== undefined && {
+                              label: "NIM",
+                              val: `${parseFloat(extraKpi.nim).toFixed(2)}%`,
+                              color: "text-teal-600 dark:text-teal-400",
+                              bg: "bg-teal-50 dark:bg-teal-900/20",
+                              note: activeYear || "",
+                            },
+                            extraKpi.car !== undefined && {
+                              label: "CAR",
+                              val: `${parseFloat(extraKpi.car).toFixed(2)}%`,
+                              color: "text-indigo-600 dark:text-indigo-400",
+                              bg: "bg-indigo-50 dark:bg-indigo-900/20",
+                              note: activeYear || "",
+                            },
+                            extraKpi.npl !== undefined && {
+                              label: "NPL",
+                              val: `${parseFloat(extraKpi.npl).toFixed(2)}%`,
+                              color: "text-rose-600 dark:text-rose-400",
+                              bg: "bg-rose-50 dark:bg-rose-900/20",
+                              note: activeYear || "",
+                            },
+                            extraKpi.bopo !== undefined && {
+                              label: "BOPO",
+                              val: `${parseFloat(extraKpi.bopo).toFixed(2)}%`,
+                              color: "text-amber-600 dark:text-amber-400",
+                              bg: "bg-amber-50 dark:bg-amber-900/20",
+                              note: activeYear || "",
+                            },
+                            extraKpi.roa !== undefined && {
+                              label: "ROA",
+                              val: `${parseFloat(extraKpi.roa).toFixed(2)}%`,
+                              color: "text-sky-600 dark:text-sky-400",
+                              bg: "bg-sky-50 dark:bg-sky-900/20",
+                              note: activeYear || "",
+                            },
+                          ].filter(Boolean)
+                        : [];
+
+                    return [...cards, ...extraCards].map((k, i) => (
                       <div
                         key={i}
                         className={`${k.bg} rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm text-center`}
@@ -2025,7 +2105,7 @@ export default function App() {
                       data={D.useOfProceeds}
                       cx="50%"
                       cy="50%"
-                      innerRadius={60}
+                      innerRadius={55}
                       outerRadius={100}
                       paddingAngle={3}
                       dataKey="value"
@@ -2036,23 +2116,40 @@ export default function App() {
                         innerRadius,
                         outerRadius,
                         value,
+                        name,
                       }) => {
                         const RADIAN = Math.PI / 180;
                         const r =
                           innerRadius + (outerRadius - innerRadius) * 0.5;
                         const x = cx + r * Math.cos(-midAngle * RADIAN);
                         const y = cy + r * Math.sin(-midAngle * RADIAN);
-                        return value >= 8 ? (
-                          <text
-                            x={x}
-                            y={y}
-                            fill="white"
-                            textAnchor="middle"
-                            dominantBaseline="central"
-                            fontSize={12}
-                            fontWeight="bold"
-                          >{`${value}%`}</text>
-                        ) : null;
+                        if (value < 5) return null;
+                        return (
+                          <g>
+                            <text
+                              x={x}
+                              y={y - 6}
+                              fill="white"
+                              textAnchor="middle"
+                              dominantBaseline="central"
+                              fontSize={13}
+                              fontWeight="bold"
+                            >{`${value}%`}</text>
+                            <text
+                              x={x}
+                              y={y + 8}
+                              fill="white"
+                              textAnchor="middle"
+                              dominantBaseline="central"
+                              fontSize={9}
+                              opacity={0.9}
+                            >
+                              {name?.length > 12
+                                ? name.slice(0, 12) + "…"
+                                : name}
+                            </text>
+                          </g>
+                        );
                       }}
                       labelLine={false}
                     >
@@ -2066,27 +2163,18 @@ export default function App() {
                     />
                   </PieChart>
                 </ResponsiveContainer>
-                <div className="mt-3 grid grid-cols-1 gap-3">
+                <div className="mt-4 space-y-2">
                   {D.useOfProceeds.map((e, i) => (
-                    <div key={i} className="flex items-start gap-3 px-1">
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <span
-                          className="w-3 h-3 rounded-full flex-shrink-0 mt-1"
-                          style={{ backgroundColor: e.color }}
-                        />
-                        <div className="min-w-0">
-                          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                            {e.name}
-                          </span>
-                          {e.desc && (
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-relaxed">
-                              {e.desc}
-                            </p>
-                          )}
-                        </div>
-                      </div>
+                    <div key={i} className="flex items-center gap-3">
                       <span
-                        className="text-sm font-bold flex-shrink-0"
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: e.color }}
+                      />
+                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex-1">
+                        {e.name}
+                      </span>
+                      <span
+                        className="text-sm font-bold"
                         style={{ color: e.color }}
                       >
                         {e.value}%
@@ -2315,65 +2403,60 @@ export default function App() {
                       <AlertTriangle className="w-4 h-4" />
                       {l.dash.rf}
                     </h4>
-                    <div className="space-y-3">
-                      {(D.isPro
-                        ? D.riskFactors
-                        : D.riskFactors.slice(0, 4)
-                      ).map((r, i) => {
+                    <div className="space-y-2">
+                      {D.riskFactors.map((r, i) => {
                         const level = r.level || "Medium";
                         const title = r.title || r;
-                        const levelIcon =
+                        const cfg =
                           level === "High"
-                            ? "🔴"
+                            ? {
+                                icon: "🔴",
+                                bg: "bg-red-50 dark:bg-red-900/25",
+                                border: "border-red-200 dark:border-red-800",
+                                text: "text-red-700 dark:text-red-300",
+                                badge:
+                                  "bg-red-100 dark:bg-red-800/50 text-red-700 dark:text-red-300",
+                              }
                             : level === "Low"
-                              ? "🟢"
-                              : "🟡";
+                              ? {
+                                  icon: "🟢",
+                                  bg: "bg-green-50 dark:bg-green-900/25",
+                                  border:
+                                    "border-green-200 dark:border-green-800",
+                                  text: "text-green-700 dark:text-green-300",
+                                  badge:
+                                    "bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300",
+                                }
+                              : {
+                                  icon: "🟡",
+                                  bg: "bg-yellow-50 dark:bg-yellow-900/25",
+                                  border:
+                                    "border-yellow-200 dark:border-yellow-800",
+                                  text: "text-yellow-700 dark:text-yellow-300",
+                                  badge:
+                                    "bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300",
+                                };
                         return (
                           <div
                             key={i}
-                            className={`rounded-xl overflow-hidden border ${level === "High" ? "border-red-200 dark:border-red-800" : level === "Low" ? "border-green-200 dark:border-green-800" : "border-yellow-200 dark:border-yellow-800"}`}
+                            className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border ${cfg.bg} ${cfg.border}`}
                           >
-                            <div
-                              className={`flex items-center gap-2 px-4 py-2.5 ${level === "High" ? "bg-red-50 dark:bg-red-900/30" : level === "Low" ? "bg-green-50 dark:bg-green-900/30" : "bg-yellow-50 dark:bg-yellow-900/30"}`}
+                            <span className="text-xs flex-shrink-0">
+                              {cfg.icon}
+                            </span>
+                            <span
+                              className={`text-sm font-medium flex-1 leading-snug ${cfg.text}`}
                             >
-                              <span className="text-sm flex-shrink-0">
-                                {levelIcon}
-                              </span>
-                              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                                {title}
-                              </span>
-                              {!D.isPro && (
-                                <span className="ml-auto text-xs text-gray-400 dark:text-gray-500 font-normal">
-                                  Standard
-                                </span>
-                              )}
-                            </div>
-                            {D.isPro && r.desc && (
-                              <div
-                                className={`px-4 py-3 border-t ${
-                                  level === "High"
-                                    ? "bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800"
-                                    : level === "Low"
-                                      ? "bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800"
-                                      : "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-100 dark:border-yellow-800"
-                                }`}
-                              >
-                                <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">
-                                  {r.desc}
-                                </p>
-                              </div>
-                            )}
+                              {title}
+                            </span>
+                            <span
+                              className={`text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${cfg.badge}`}
+                            >
+                              {level}
+                            </span>
                           </div>
                         );
                       })}
-                      {!D.isPro && D.riskFactors.length > 4 && (
-                        <p className="text-xs text-center text-gray-400 dark:text-gray-500 py-2">
-                          +{D.riskFactors.length - 4}{" "}
-                          {lang === "EN"
-                            ? "more risks in Pro plan"
-                            : "risiko lagi di paket Pro"}
-                        </p>
-                      )}
                     </div>
                   </div>
                   {/* Benefits */}
@@ -2382,10 +2465,9 @@ export default function App() {
                       <CheckCircle2 className="w-4 h-4" />
                       {l.dash.ben}
                     </h4>
-                    <div className="space-y-2.5">
+                    <div className="space-y-2">
                       {D.potentialBenefits.map((b, i) => {
                         const title = b.title || b;
-                        const desc = b.desc || null;
                         const icons = [
                           "🚀",
                           "💡",
@@ -2399,24 +2481,15 @@ export default function App() {
                         return (
                           <div
                             key={i}
-                            className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/10 border border-emerald-200 dark:border-emerald-800 rounded-xl px-4 py-3"
+                            className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800"
                           >
-                            <div className="flex items-start gap-3">
-                              <span className="text-base flex-shrink-0 mt-0.5">
-                                {icons[i % icons.length]}
-                              </span>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">
-                                  {title}
-                                </p>
-                                {desc && (
-                                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">
-                                    {desc}
-                                  </p>
-                                )}
-                              </div>
-                              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
-                            </div>
+                            <span className="text-xs flex-shrink-0">
+                              {icons[i % icons.length]}
+                            </span>
+                            <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex-1 leading-snug">
+                              {title}
+                            </span>
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
                           </div>
                         );
                       })}
