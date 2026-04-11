@@ -195,18 +195,25 @@ def llm_extract_financials(text, model=None):
         else: others.append(c)
 
     mid = len(all_chunks)//2
-    selected = list(priority[:8])
-    for idx in [0, mid-1, mid, mid+1, len(all_chunks)-1]:
+    # Batasi chunk: max 5 untuk hemat token
+    # Priority chunks (yang mengandung kata kunci keuangan) diutamakan
+    selected = list(priority[:4])
+    # Tambah chunk tengah dan akhir (biasanya ada tabel keuangan)
+    for idx in [mid, len(all_chunks)-1]:
         try:
             c = all_chunks[idx]
             if c not in selected: selected.append(c)
         except: pass
-    selected = selected[:12]
+    # Jika priority kurang dari 3, tambah chunk awal
+    if len(selected) < 3 and all_chunks:
+        if all_chunks[0] not in selected:
+            selected.insert(0, all_chunks[0])
+    selected = selected[:5]  # MAKSIMAL 5 chunk saja
 
     for chunk in selected:
         try:
             resp = client.chat.completions.create(
-                model=_m, temperature=0.0, max_tokens=5000,
+                model=_m, temperature=0.0, max_tokens=3000,
                 messages=[
                     {"role":"system","content":_FIN_SYSTEM},
                     {"role":"user","content":f"EKSTRAK DATA KEUANGAN:\n\n{chunk}"},
@@ -462,7 +469,7 @@ E. {risk_instr}
 F. {benefit_instr}
 
 DOCUMENT (read carefully):
-{text[:380000] if is_pro else text[:200000]}
+{text[:300000] if is_pro else text[:120000]}
 
 OUTPUT JSON (all fields required):
 {{"company_name":"","ticker":"","sector":"","ipo_date":"","share_price":"","total_shares":"","market_cap":"",
@@ -475,7 +482,7 @@ OUTPUT JSON (all fields required):
 
     try:
         resp = client.chat.completions.create(
-            model=_m, temperature=0.1, max_tokens=16000,
+            model=_m, temperature=0.1, max_tokens=12000 if is_pro else 6000,
             messages=[{"role":"user","content":prompt}],
         )
         raw = resp.choices[0].message.content.strip()
@@ -533,11 +540,15 @@ def search_ticker_by_name(company_name):
     return ""
 
 # ── MAIN ──────────────────────────────────────────────────────────────
+# Deteksi Railway instance (untuk debug multi-instance)
+import socket as _socket
+_HOSTNAME = _socket.gethostname()
+
 def analyze_prospectus(text, lang="ID", model=None):
     lang   = (lang or "ID").upper()
     _model = model or MODEL_FLASH
     banking = is_bank(text)
-    logger.info(f"[START] lang={lang} model={_model} len={len(text)} banking={banking}")
+    logger.info(f"[START] host={_HOSTNAME} lang={lang} model={_model} len={len(text)} banking={banking}")
 
     fx_rate  = detect_fx_rate(text)
     currency = detect_currency(text)
