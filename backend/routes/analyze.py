@@ -28,9 +28,30 @@ def run_analysis(
 
     lang  = (body.lang or "ID").upper()
     plan  = (body.plan or "basic").lower()
-    model = MODEL_PRO if plan == "pro" else MODEL_FLASH
+    model = MODEL_FLASH  # Force Flash untuk semua plan — hemat token
 
     logger.info(f"[ANALYZE] id={analysis_id} lang={lang} plan={plan} model={model}")
+
+    # GUARD: Cek apakah sudah dianalisis dengan plan & lang yang sama
+    # Ini mencegah pemborosan token jika frontend memanggil ulang tanpa perlu
+    if analysis.ipo_details:
+        try:
+            existing = json.loads(analysis.ipo_details)
+            existing_plan = existing.get("plan","basic").lower()
+            existing_lang = existing.get("lang","ID").upper()
+            # Skip jika sudah ada hasil dengan plan & lang yang sama
+            if existing_plan == plan and existing_lang == lang and analysis.summary:
+                logger.info(f"[SKIP] Analisis sudah ada untuk id={analysis_id} plan={plan} lang={lang}, skip LLM call")
+                return {
+                    "message":      "Analisis sudah ada (cached)",
+                    "analysis_id":  analysis_id,
+                    "company_name": analysis.company_name,
+                    "plan":         plan,
+                    "model":        model,
+                    "cached":       True,
+                }
+        except Exception:
+            pass  # Jika parse gagal, lanjut re-analyze
 
     ticker = ""; market = {}; underwriter = {}
     risks = []; benefits = []
