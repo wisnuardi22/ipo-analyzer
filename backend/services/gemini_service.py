@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 client = OpenAI(api_key=os.environ.get("SUMOPOD_API_KEY"), base_url="https://ai.sumopod.com/v1")
 
-def _call_llm(messages, max_tokens=4000, temperature=0.0, retries=3, model=None):
+def _call_llm(messages, max_tokens=4000, temperature=0.0, retries=4, model=None):
     """Wrapper LLM call dengan retry jika rate limit (429)."""
     _model = model or MODEL_FLASH
     for attempt in range(retries):
@@ -26,12 +26,12 @@ def _call_llm(messages, max_tokens=4000, temperature=0.0, retries=3, model=None)
         except Exception as e:
             err = str(e)
             if "429" in err or "rate" in err.lower() or "cooling" in err.lower():
-                wait = 10 * (attempt + 1)  # 10s, 20s, 30s
-                logger.warning(f"Rate limit hit (attempt {attempt+1}/{retries}), wait {wait}s: {err[:100]}")
+                wait = 20 * (attempt + 1)  # 20s, 40s, 60s, 80s
+                logger.warning(f"Sumopod Rate limit hit (attempt {attempt+1}/{retries}), wait {wait}s: {err[:100]}")
                 time.sleep(wait)
             else:
                 raise
-    raise Exception("Rate limit: semua retry gagal. Coba lagi dalam beberapa menit.")
+    raise Exception("Rate limit: server terlalu sibuk. Semua retry gagal. Coba lagi dalam beberapa menit.")
 
 MODEL_FLASH = "gemini/gemini-2.5-flash"
 MODEL_PRO   = "gemini/gemini-2.5-pro"  # Hanya untuk Pro plan jika diminta
@@ -156,6 +156,7 @@ OUTPUT:
 "data_per_tahun":[{"tahun":"TAHUN_A","pendapatan":null,"laba_kotor":null,"laba_usaha":null,"laba_bersih":null,"depresiasi":null}],
 "rasio_per_tahun":[{"tahun":"TAHUN_A","roe":null,"roa":null,"der":null,"npm":null,"eps":null,"car":null,"npl":null,"nim":null,"bopo":null}],
 "total_ekuitas":null,"total_liabilitas":null,"total_aset":null,"total_saham_beredar":null,"harga_penawaran":null}"""
+
 def _safe_json(raw):
     raw = raw.strip()
     if "```" in raw:
@@ -174,14 +175,11 @@ def llm_extract_financials(text: str) -> Dict:
     """HEMAT: 1 call LLM saja dengan chunk terbaik."""
     # Ambil bagian tengah dokumen (biasanya ada tabel keuangan) + akhir
     n = len(text)
-    # Tabel keuangan biasanya di 30%-80% dokumen
     start = max(0, int(n * 0.25))
     end   = min(n, int(n * 0.85))
     core  = text[start:end]
 
-    # Ambil max 80K karakter dari area tabel keuangan
     if len(core) > 80000:
-        # Cari posisi kata kunci keuangan
         keywords = ["ikhtisar data keuangan","laporan laba rugi","rasio keuangan","selected financial","data keuangan penting"]
         best_pos = 0
         for kw in keywords:
@@ -200,7 +198,7 @@ def llm_extract_financials(text: str) -> Dict:
                 {"role":"user","content":f"DOKUMEN PROSPEKTUS:\n\n{chunk}"},
             ],
             max_tokens=4000, temperature=0.0,
-            model=MODEL_FLASH,  # Financial extraction selalu Flash
+            model=MODEL_FLASH, 
         )
         result = _safe_json(raw) or {}
         logger.info(f"[FIN] host={_HOST} tahun={result.get('tahun_tersedia')} rasio={len(result.get('rasio_per_tahun',[]))}")
@@ -269,7 +267,6 @@ def normalize_and_compute(fin_raw: Dict, fx_rate, is_banking=False):
             v = parse_num(last_r.get(field))
             if v is not None: kpi[kkey] = fmt.format(v)
 
-    # Fallback dari laporan keuangan jika tidak ada rasio
     try:
         if saham and laba_last and saham>0 and kpi["eps"]=="N/A":
             ev = laba_last/saham
@@ -306,14 +303,12 @@ def normalize_and_compute(fin_raw: Dict, fx_rate, is_banking=False):
 # ══════════════════════════════════════════
 # 5. RISK SCORING
 # ══════════════════════════════════════════
-# High: risiko yang benar-benar mengancam kelangsungan bisnis
 _HIGH_SIGNALS = [
     "pencabutan izin","going concern","gagal bayar","pailit",
     r"satu pelanggan.*\d{2,3}%",r"konsentrasi.*>.*40%","perubahan status pma",
     "akuisisi.*tidak dapat dilaksanakan","tidak dapat mempertahankan izin",
     "license revocation","material adverse","substantial doubt",
 ]
-# Low: risiko pasar umum yang ada di semua bisnis
 _LOW_SIGNALS = [
     "harga saham","likuiditas saham","volatilitas pasar modal",
     "share price","market liquidity","nilai tukar.*tidak material",
@@ -409,20 +404,17 @@ OUTPUT JSON (WAJIB semua field terisi):
         logger.info(f"[QUAL] host={_HOST} model={_model} is_pro={is_pro}")
         result = _safe_json(raw)
         if result:
-            # Koreksi risk level dengan scoring logic
             high_count = 0
             medium_count = 0
             for r in result.get("risks",[]):
                 llm_lvl = str(r.get("level","Medium")).strip()
                 scored  = score_risk(r.get("title",""), r.get("desc",""))
                 prio    = {"High":3,"Medium":2,"Low":1}
-                # Ambil yang lebih rendah — hindari inflate ke High
                 final_lvl = scored if prio.get(scored,2) < prio.get(llm_lvl,2) else llm_lvl
                 r["level"] = final_lvl
                 if final_lvl == "High":   high_count += 1
                 elif final_lvl == "Medium": medium_count += 1
 
-            # PAKSA OVERALL RISK LEVEL menjadi 1 kata mutlak
             if high_count >= 2:
                 result["overall_risk_level"] = "High"
             elif high_count == 1 or medium_count >= 2:
@@ -431,7 +423,6 @@ OUTPUT JSON (WAJIB semua field terisi):
                 result["overall_risk_level"] = "Low"
             return result
 
-        # Repair JSON terpotong
         fixed = re.sub(r",\s*([}\]])",r"\1",raw)
         s = fixed.find("{")
         if s != -1:
@@ -475,12 +466,8 @@ def search_ticker(company_name: str) -> str:
 # 8. MAIN
 # ══════════════════════════════════════════
 def analyze_prospectus(text: str, lang: str="ID", model: str=None) -> dict:
-    """
-    model parameter diabaikan — selalu pakai Flash untuk efisiensi.
-    Perbedaan Basic vs Pro hanya di output (jumlah detail).
-    """
     lang    = (lang or "ID").upper()
-    is_pro  = (model == "gemini/gemini-2.5-pro")  # flag untuk output detail
+    is_pro  = (model == "gemini/gemini-2.5-pro")
     banking = is_bank(text)
     logger.info(f"[START] host={_HOST} lang={lang} is_pro={is_pro} len={len(text)} banking={banking}")
 
@@ -496,19 +483,21 @@ def analyze_prospectus(text: str, lang: str="ID", model: str=None) -> dict:
     financial, kpi = normalize_and_compute(fin_raw, fx_rate, is_banking=banking)
     logger.info(f"[KPI] {json.dumps(kpi, ensure_ascii=False)}")
 
+    # TAMBAHAN: Jeda 15 detik untuk menghindari Sumopod Rate Limit antara 2 request raksasa
+    logger.info("Mencegah Rate Limit Sumopod: Menunggu 15 detik sebelum request kedua...")
+    time.sleep(15)
+
     # 1 call qualitative
     result = llm_qualitative(text, kpi, financial, lang=lang, is_pro=is_pro)
     result["financial"] = financial
     result["kpi"]       = kpi
 
-    # Ticker
     ticker = str(result.get("ticker") or "").strip().upper()
     if not ticker or not re.match(r"^[A-Z]{2,6}$",ticker):
         company = result.get("company_name","")
         if company: ticker = search_ticker(company)
         result["ticker"] = ticker
 
-    # Validasi UoF
     uof = result.get("use_of_funds",[])
     if uof:
         total = sum(float(x.get("allocation") or 0) for x in uof)
