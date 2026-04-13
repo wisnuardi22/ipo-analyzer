@@ -56,14 +56,11 @@ const TradingViewSingleQuote = forwardRef(({ symbol }, ref) => {
   useEffect(() => {
     if (!ref?.current) return;
     ref.current.innerHTML = "";
-
     const wrapper = document.createElement("div");
     wrapper.className = "tradingview-widget-container";
-
     const div = document.createElement("div");
     div.className = "tradingview-widget-container__widget";
     wrapper.appendChild(div);
-
     const script = document.createElement("script");
     script.type = "text/javascript";
     script.src =
@@ -76,11 +73,9 @@ const TradingViewSingleQuote = forwardRef(({ symbol }, ref) => {
       isTransparent: true,
       locale: "en",
     });
-
     wrapper.appendChild(script);
     ref.current.appendChild(wrapper);
   }, [symbol]);
-
   return <div ref={ref} />;
 });
 
@@ -88,14 +83,11 @@ const TradingViewMiniChart = forwardRef(({ symbol }, ref) => {
   useEffect(() => {
     if (!ref?.current) return;
     ref.current.innerHTML = "";
-
     const wrapper = document.createElement("div");
     wrapper.className = "tradingview-widget-container";
-
     const div = document.createElement("div");
     div.className = "tradingview-widget-container__widget";
     wrapper.appendChild(div);
-
     const script = document.createElement("script");
     script.type = "text/javascript";
     script.src =
@@ -112,11 +104,9 @@ const TradingViewMiniChart = forwardRef(({ symbol }, ref) => {
       autosize: true,
       largeChartUrl: `https://www.tradingview.com/chart/?symbol=${symbol}`,
     });
-
     wrapper.appendChild(script);
     ref.current.appendChild(wrapper);
   }, [symbol]);
-
   return <div ref={ref} />;
 });
 
@@ -651,7 +641,6 @@ const _computeRiskLevel = (risks) => {
   );
   return max >= 3 ? "HIGH" : max === 2 ? "MEDIUM" : "LOW";
 };
-
 const _computeRiskLabel = (risks) => {
   const l = _computeRiskLevel(risks);
   return l === "HIGH"
@@ -660,7 +649,6 @@ const _computeRiskLabel = (risks) => {
       ? "Risiko Rendah"
       : "Risiko Sedang";
 };
-
 const _computeRiskColor = (risks) => {
   const l = _computeRiskLevel(risks);
   return l === "HIGH" ? "#EF4444" : l === "LOW" ? "#22C55E" : "#F59E0B";
@@ -672,7 +660,6 @@ const _buildMapped = (d) => {
     v === null || v === undefined
       ? null
       : parseFloat(String(v).replace("%", ""));
-
   const normFinancial = (arr) => {
     if (!arr || !Array.isArray(arr) || arr.length === 0) return null;
     const result = arr
@@ -683,7 +670,6 @@ const _buildMapped = (d) => {
       .filter((x) => x.year && x.value !== null && !isNaN(x.value));
     return result.length > 0 ? result : null;
   };
-
   const trendTag = (arr) => {
     if (!arr || arr.length < 2) return null;
     const valid = arr.filter((x) => x.value !== null);
@@ -693,7 +679,6 @@ const _buildMapped = (d) => {
     if (diff < -2) return "down";
     return "stable";
   };
-
   const ticker = d.ticker || d.ipo_details?.ticker || "";
   const kpiData =
     d.kpi && Object.keys(d.kpi).length > 0 ? d.kpi : d.ipo_details?.kpi || {};
@@ -702,7 +687,6 @@ const _buildMapped = (d) => {
       ? d.use_of_funds
       : d.ipo_details?.use_of_funds || [];
   const finData = d.financial || {};
-
   return {
     company: {
       name: d.company_name || "",
@@ -799,7 +783,6 @@ export default function App() {
   const tvSymbolRef = useRef(null);
   const tvMiniChartRef = useRef(null);
   const fileRef = useRef();
-
   const l = T[lang];
 
   useEffect(() => {
@@ -821,7 +804,6 @@ export default function App() {
   const loadTradingViewWidgets = (ticker) => {
     if (!ticker) return;
     const symbol = `IDX:${ticker}`;
-
     if (tvSymbolRef.current) {
       tvSymbolRef.current.innerHTML = "";
       const s1 = document.createElement("script");
@@ -837,7 +819,6 @@ export default function App() {
       });
       tvSymbolRef.current.appendChild(s1);
     }
-
     if (tvMiniChartRef.current) {
       tvMiniChartRef.current.innerHTML = "";
       const s2 = document.createElement("script");
@@ -873,11 +854,9 @@ export default function App() {
     if (!file) return;
     setAnalyzing(true);
     setStatus(lang === "EN" ? "Uploading PDF..." : "Mengupload PDF...");
-
     try {
       const fd = new FormData();
       fd.append("file", file);
-
       const up = await axios.post(`${API_BASE}/upload`, fd);
       setAnalysisId(up.data.analysis_id); // ← simpan ID untuk re-analyze
       setStatus(
@@ -885,7 +864,6 @@ export default function App() {
           ? "AI is analyzing document..."
           : "AI sedang menganalisis dokumen...",
       );
-
       await axios.post(`${API_BASE}/analyze/${up.data.analysis_id}`, {
         lang,
         plan,
@@ -894,7 +872,6 @@ export default function App() {
         `${API_BASE}/analysis/${up.data.analysis_id}`,
       );
       const d = res.data;
-
       console.log(
         "API OK:",
         d.company_name,
@@ -903,15 +880,12 @@ export default function App() {
         "| years:",
         d.financial?.years,
       );
-
       setData(_buildMapped(d));
       setKpiYear(null);
       setReady(true);
       setStatus("");
-
       const ticker = d.ticker || d.ipo_details?.ticker || "";
       if (ticker) fetchLivePrice(ticker);
-
       setTimeout(() => go("dashboard"), 600);
     } catch (e) {
       setStatus("Error: " + (e.response?.data?.detail || e.message));
@@ -924,7 +898,6 @@ export default function App() {
   const handleLangChange = async (newLang) => {
     setLang(newLang);
     if (status) setStatus("");
-
     // Re-analyze dengan bahasa baru jika ada analisis yang sudah selesai
     if (ready && analysisId) {
       setAnalyzing(true);
@@ -933,7 +906,6 @@ export default function App() {
           ? "Translating analysis..."
           : "Menerjemahkan analisis...",
       );
-
       try {
         await axios.post(`${API_BASE}/analyze/${analysisId}`, {
           lang: newLang,
@@ -961,11 +933,10 @@ export default function App() {
       setUser({ email: loginForm.email, name: loginForm.email.split("@")[0] });
       setShowLogin(false);
       setLoginErr("");
-    } else {
+    } else
       setLoginErr(
         lang === "EN" ? "Please fill all fields" : "Harap isi semua field",
       );
-    }
   };
 
   const handleContact = (e) => {
@@ -985,7 +956,6 @@ export default function App() {
     color: "#fff",
     fontSize: "13px",
   };
-
   const riskColor = (level) =>
     ({
       High: "border-red-500 bg-red-50 dark:bg-red-900/20",
@@ -1011,6 +981,9 @@ export default function App() {
           /* Reset container */
           .max-w-7xl { max-width: 100% !important; padding: 0 !important; margin: 0 !important; }
           section { padding: 0 !important; background: white !important; }
+
+          /* ── HALAMAN 1: Header + Info IPO + About + UoF + Risk/Benefit ── */
+          /* ── HALAMAN 2: KPI + Financial Charts ── */
 
           /* Print header */
           .print-header { display: flex !important; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 2px solid #1e293b; }
@@ -1116,7 +1089,6 @@ export default function App() {
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
-
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -1182,7 +1154,6 @@ export default function App() {
                 Indonesian IPO Analysis
               </span>
             </div>
-
             <nav className="hidden md:flex items-center gap-8">
               {["home", "service", "about", "contact"].map((k) => (
                 <button
@@ -1194,7 +1165,6 @@ export default function App() {
                 </button>
               ))}
             </nav>
-
             <div className="flex items-center gap-3">
               {/* ── LANG TOGGLE — memanggil handleLangChange ── */}
               <button
@@ -1218,7 +1188,6 @@ export default function App() {
                   <span className="text-xs opacity-60 ml-0.5">↺</span>
                 )}
               </button>
-
               <button
                 onClick={() => setDark(!dark)}
                 className="relative w-14 h-7 bg-gray-300 dark:bg-gray-600 rounded-full transition-colors focus:outline-none"
@@ -1233,7 +1202,6 @@ export default function App() {
                   )}
                 </span>
               </button>
-
               {user ? (
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center">
@@ -1257,7 +1225,6 @@ export default function App() {
                   <User className="w-5 h-5 text-gray-700 dark:text-gray-300" />
                 </button>
               )}
-
               <button
                 onClick={() => setMenu(!menu)}
                 className="md:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -1270,7 +1237,6 @@ export default function App() {
               </button>
             </div>
           </div>
-
           {menu && (
             <div className="md:hidden py-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
               {["home", "service", "about", "contact"].map((k) => (
@@ -1307,7 +1273,6 @@ export default function App() {
               {l.hero.subtitle}
             </p>
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-6">
               <h3 className="text-xl font-bold mb-3">{l.hero.ab_t}</h3>
@@ -1353,7 +1318,6 @@ export default function App() {
               {l.svc.sub}
             </p>
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto mb-16">
             {[
               {
@@ -1385,7 +1349,6 @@ export default function App() {
                     {l.svc.pop}
                   </div>
                 )}
-
                 <div className="text-center mb-6">
                   <div className="flex items-center justify-center gap-2 mb-1">
                     <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -1408,7 +1371,6 @@ export default function App() {
                     )}
                   </div>
                 </div>
-
                 <ul className="space-y-3 mb-8">
                   {p.features.map((f, i) => (
                     <li key={i} className="flex items-start gap-3">
@@ -1419,7 +1381,6 @@ export default function App() {
                     </li>
                   ))}
                 </ul>
-
                 <button
                   className={`w-full py-3 rounded-lg font-semibold transition-colors ${plan === p.key ? "bg-emerald-500 text-white hover:bg-emerald-600" : "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-600"}`}
                 >
@@ -1455,7 +1416,6 @@ export default function App() {
                   </div>
                 </div>
               </div>
-
               <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-2xl p-6">
                 <div className="flex items-start gap-4 mb-6">
                   <div className="w-8 h-8 bg-emerald-600 rounded-full flex items-center justify-center flex-shrink-0 text-white font-bold text-sm">
@@ -1470,7 +1430,6 @@ export default function App() {
                     </p>
                   </div>
                 </div>
-
                 <div
                   onDragOver={(e) => {
                     e.preventDefault();
@@ -1546,7 +1505,6 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-
                 {status && (
                   <p
                     className={`text-center mt-3 text-sm font-medium ${status.startsWith("Error") ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}
@@ -1554,7 +1512,6 @@ export default function App() {
                     {status}
                   </p>
                 )}
-
                 {fileName && (
                   <div className="mt-6 flex justify-center">
                     <button
@@ -1624,6 +1581,7 @@ export default function App() {
                     {status}
                   </span>
                 )}
+
                 <button
                   onClick={handlePrint}
                   className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg font-semibold text-sm transition-colors"
@@ -1810,7 +1768,6 @@ export default function App() {
                         return `Rp ${Math.abs(num).toLocaleString("id-ID", { minimumFractionDigits: 2 })}`;
                       return String(v);
                     };
-
                     // Extra KPI untuk bank (CAR, NPL, NIM, BOPO)
                     const extraKpi = activeYear
                       ? D.kpiByYear?.extra?.[activeYear] || {}
@@ -1919,11 +1876,9 @@ export default function App() {
                         <p className={`text-xl font-bold ${k.color}`}>
                           {k.val || "—"}
                         </p>
-                        {k.note && (
-                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
-                            {k.note}
-                          </p>
-                        )}
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
+                          {k.note}
+                        </p>
                       </div>
                     ));
                   })()}
@@ -1969,7 +1924,6 @@ export default function App() {
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
                   {l.dash.fin_sub}
                 </p>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   {[
                     {
@@ -2043,7 +1997,6 @@ export default function App() {
                       : null;
                     const chartType =
                       (ch.data?.length || 0) <= 1 ? "bar" : "line";
-
                     if (!ch.data || ch.data.length === 0)
                       return (
                         <div
@@ -2057,7 +2010,6 @@ export default function App() {
                           </p>
                         </div>
                       );
-
                     return (
                       <div
                         key={i}
@@ -2092,7 +2044,6 @@ export default function App() {
                         <p className="text-xs text-gray-400 dark:text-gray-500 mb-1 italic">
                           {ch.note}
                         </p>
-
                         {lastVal !== null && (
                           <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
                             <span className="font-semibold text-gray-700 dark:text-gray-300">
@@ -2108,7 +2059,6 @@ export default function App() {
                             )}
                           </p>
                         )}
-
                         <ResponsiveContainer width="100%" height={220}>
                           {chartType === "bar" ? (
                             <BarChart
@@ -2373,7 +2323,6 @@ export default function App() {
                         .includes("penuh") ||
                       (D.underwriter.type || "").toLowerCase().includes("full");
                     let stars = 3;
-
                     if (
                       /sangat baik|terbesar|tier.?1|top tier|terkemuka|mandiri sekuritas|bca sekuritas|bri danareksa|mirae|trimegah|bahana|cgs.?cimb|indo premier/i.test(
                         rep,
@@ -2389,7 +2338,6 @@ export default function App() {
                     else if (/kurang dikenal|perlu diwaspadai|kecil/i.test(rep))
                       stars = 2;
                     else if (/tidak dikenal|sanksi|buruk/i.test(rep)) stars = 1;
-
                     if (isFullCommit && stars >= 3)
                       stars = Math.min(stars + 0.5, 5);
 
@@ -2442,7 +2390,6 @@ export default function App() {
                         </div>
                       );
                     };
-
                     const ratingLabel =
                       stars >= 4.5
                         ? lang === "EN"
@@ -2459,7 +2406,6 @@ export default function App() {
                             : lang === "EN"
                               ? "Below Average"
                               : "Kurang";
-
                     return (
                       <div className="mb-5 rounded-2xl overflow-hidden border border-blue-200 dark:border-blue-800 shadow-sm">
                         <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-5 py-3 flex items-center justify-between">
@@ -2585,7 +2531,6 @@ export default function App() {
                                   badge:
                                     "bg-yellow-100 dark:bg-yellow-800/50 text-yellow-700 dark:text-yellow-300",
                                 };
-
                         return (
                           <div
                             key={i}
@@ -2609,7 +2554,6 @@ export default function App() {
                       })}
                     </div>
                   </div>
-
                   {/* Benefits */}
                   <div>
                     <h4 className="text-base font-semibold text-emerald-600 dark:text-emerald-400 mb-3 flex items-center gap-2">
@@ -2688,7 +2632,6 @@ export default function App() {
               </p>
             </div>
           </div>
-
           <div className="mb-16">
             <h3 className="text-3xl font-bold text-gray-900 dark:text-white text-center mb-12">
               {l.about.why}
@@ -2734,7 +2677,6 @@ export default function App() {
               ))}
             </div>
           </div>
-
           <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-12 text-white mb-16">
             <h3 className="text-3xl font-bold text-center mb-12">
               {l.about.imp}
@@ -2755,7 +2697,6 @@ export default function App() {
               ))}
             </div>
           </div>
-
           <div>
             <h3 className="text-3xl font-bold text-gray-900 dark:text-white text-center mb-12">
               {l.about.how}
@@ -2797,7 +2738,6 @@ export default function App() {
               {l.con.sub}
             </p>
           </div>
-
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
             {[
               {
@@ -2851,7 +2791,6 @@ export default function App() {
               </div>
             ))}
           </div>
-
           <div className="max-w-3xl mx-auto">
             <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-8">
               <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">
@@ -2929,7 +2868,6 @@ export default function App() {
                     required
                   />
                 </div>
-
                 {sent && (
                   <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 rounded-lg p-4 flex items-center gap-3">
                     <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
@@ -2938,7 +2876,6 @@ export default function App() {
                     </p>
                   </div>
                 )}
-
                 <button
                   type="submit"
                   className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 group"
@@ -2947,7 +2884,6 @@ export default function App() {
                   <Send className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </button>
               </form>
-
               <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-700">
                 <p className="text-center text-gray-600 dark:text-gray-400 mb-4">
                   {l.con.sc}

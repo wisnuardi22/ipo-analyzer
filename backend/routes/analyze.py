@@ -28,7 +28,9 @@ def run_analysis(
 
     lang  = (body.lang or "ID").upper()
     plan  = (body.plan or "basic").lower()
-    model = MODEL_FLASH  # Force Flash untuk semua plan — hemat token
+    # Financial extraction: selalu Flash (hemat)
+    # Qualitative: Flash untuk basic, Pro untuk pro
+    model = MODEL_PRO if plan == "pro" else MODEL_FLASH
 
     logger.info(f"[ANALYZE] id={analysis_id} lang={lang} plan={plan} model={model}")
 

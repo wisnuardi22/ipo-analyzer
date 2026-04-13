@@ -3,7 +3,7 @@ gemini_service.py - IPO Analyzer
 SEMUA pakai Gemini Flash (hemat). Basic vs Pro dibedakan dari OUTPUT saja, bukan model.
 """
 from __future__ import annotations
-import json, logging, math, os, re, socket
+import json, logging, math, os, re, socket, time
 from typing import Any, Dict, List, Optional, Tuple
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -13,9 +13,28 @@ logger = logging.getLogger(__name__)
 
 client = OpenAI(api_key=os.environ.get("SUMOPOD_API_KEY"), base_url="https://ai.sumopod.com/v1")
 
-# FORCE FLASH - semua analisis pakai Flash, hemat token
+def _call_llm(messages, max_tokens=4000, temperature=0.0, retries=3, model=None):
+    """Wrapper LLM call dengan retry jika rate limit (429)."""
+    _model = model or MODEL_FLASH
+    for attempt in range(retries):
+        try:
+            resp = client.chat.completions.create(
+                model=_model, temperature=temperature,
+                max_tokens=max_tokens, messages=messages,
+            )
+            return resp.choices[0].message.content.strip()
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "rate" in err.lower() or "cooling" in err.lower():
+                wait = 10 * (attempt + 1)  # 10s, 20s, 30s
+                logger.warning(f"Rate limit hit (attempt {attempt+1}/{retries}), wait {wait}s: {err[:100]}")
+                time.sleep(wait)
+            else:
+                raise
+    raise Exception("Rate limit: semua retry gagal. Coba lagi dalam beberapa menit.")
+
 MODEL_FLASH = "gemini/gemini-2.5-flash"
-MODEL_PRO   = MODEL_FLASH   # Override: Pro juga pakai Flash, beda di output saja
+MODEL_PRO   = "gemini/gemini-2.5-pro"  # Hanya untuk Pro plan jika diminta
 MODEL       = MODEL_FLASH
 _HOST       = socket.gethostname()
 
@@ -120,23 +139,23 @@ B. RASIO KEUANGAN PENTING (cari tabel: "RASIO KEUANGAN", "KEY FINANCIAL RATIOS")
    - npl: Non Performing Loan (%) — khusus bank
    - nim: Net Interest Margin (%) — khusus bank
    - bopo: BOPO/Cost to Income (%) — khusus bank
-   PENTING: Salin angka PERSIS dari tabel, JANGAN hitung sendiri!
 
-C. NERACA (tahun TERAKHIR):
+C. NERACA (tahun TERAKHIR SAJA):
    total_ekuitas, total_liabilitas, total_aset
 
 D. INFO IPO:
    total_saham_beredar (setelah IPO), harga_penawaran (angka saja, null jika DRHP)
 
 E. SATUAN: "jutaan"/"ribuan"/"miliar"/"full" — baca dari header tabel
-   Angka negatif dalam kurung: (1.234) → tulis -1234
+   Jika angka dalam kurung, tulis dengan minus (contoh: -1234)
+
+PENTING: Gunakan tahun yang BENAR-BENAR ADA di dokumen.
 
 OUTPUT:
-{"satuan":"jutaan","mata_uang":"IDR","tahun_tersedia":["2022","2023","2024"],
-"data_per_tahun":[{"tahun":"2022","pendapatan":null,"laba_kotor":null,"laba_usaha":null,"laba_bersih":null,"depresiasi":null}],
-"rasio_per_tahun":[{"tahun":"2022","roe":null,"roa":null,"der":null,"npm":null,"eps":null,"car":null,"npl":null,"nim":null,"bopo":null}],
+{"satuan":"jutaan","mata_uang":"IDR","tahun_tersedia":["TAHUN_A","TAHUN_B","TAHUN_C"],
+"data_per_tahun":[{"tahun":"TAHUN_A","pendapatan":null,"laba_kotor":null,"laba_usaha":null,"laba_bersih":null,"depresiasi":null}],
+"rasio_per_tahun":[{"tahun":"TAHUN_A","roe":null,"roa":null,"der":null,"npm":null,"eps":null,"car":null,"npl":null,"nim":null,"bopo":null}],
 "total_ekuitas":null,"total_liabilitas":null,"total_aset":null,"total_saham_beredar":null,"harga_penawaran":null}"""
-
 def _safe_json(raw):
     raw = raw.strip()
     if "```" in raw:
@@ -175,14 +194,15 @@ def llm_extract_financials(text: str) -> Dict:
         chunk = core
 
     try:
-        resp = client.chat.completions.create(
-            model=MODEL_FLASH, temperature=0.0, max_tokens=4000,
+        raw = _call_llm(
             messages=[
                 {"role":"system","content":_FIN_SYSTEM},
                 {"role":"user","content":f"DOKUMEN PROSPEKTUS:\n\n{chunk}"},
             ],
+            max_tokens=4000, temperature=0.0,
+            model=MODEL_FLASH,  # Financial extraction selalu Flash
         )
-        result = _safe_json(resp.choices[0].message.content) or {}
+        result = _safe_json(raw) or {}
         logger.info(f"[FIN] host={_HOST} tahun={result.get('tahun_tersedia')} rasio={len(result.get('rasio_per_tahun',[]))}")
         return result
     except Exception as e:
@@ -349,15 +369,15 @@ D. UNDERWRITER: lead (nama lengkap), others (array), type ("Full Commitment"/"Be
 E. RISK FACTORS — WAJIB BERVARIASI (High/Medium/Low):
    Cari bab "Faktor Risiko". Ekstrak {"5-6" if is_pro else "4-5"} risiko.
    
-   ATURAN LEVEL (WAJIB IKUTI):
+   ATURAN LEVEL (WAJIB IKUTI KETAT):
    - "High" HANYA untuk: pencabutan izin usaha, going concern doubt, ketergantungan 1 pelanggan >50% revenue, gagal bayar material, akuisisi kritis yang bisa gagal
    - "Medium": risiko operasional, teknologi, SDM, persaingan, kredit, regulasi yang membutuhkan adaptasi
    - "Low": volatilitas harga saham, risiko nilai tukar minor, risiko pasar umum, force majeure
    
-   PENTING: TIDAK SEMUA RISIKO ADALAH HIGH. Distribusi wajar: 1-2 High, 2-3 Medium, 1 Low.
-   Setiap prospektus berbeda — analisis sesuai kondisi SPESIFIK perusahaan ini.
+   DISTRIBUSI WAJAR: 1-2 High, 2-3 Medium, 1 Low. Jangan semua High atau semua Medium.
+   Setiap prospektus berbeda — identifikasi risiko UNIK perusahaan ini.
    
-   overall_risk_level: "High" hanya jika 2+ risiko genuinely High. Sinon "Medium".
+   overall_risk_level: WAJIB pilih SALAH SATU ("High", "Medium", atau "Low"). JANGAN digabung.
    overall_risk_reason: 2 kalimat dengan fakta spesifik dari prospektus ini.
 
 F. BENEFITS: {"5-6" if is_pro else "3-4"} keunggulan spesifik dari dokumen dengan data konkret.
@@ -380,20 +400,35 @@ OUTPUT JSON (WAJIB semua field terisi):
 "benefits":[{{"title":"","desc":""}}]}}"""
 
     try:
-        resp = client.chat.completions.create(
-            model=MODEL_FLASH, temperature=0.1, max_tokens=max_tok,
+        _model = MODEL_PRO if is_pro else MODEL_FLASH
+        raw = _call_llm(
             messages=[{"role":"user","content":prompt}],
+            max_tokens=max_tok, temperature=0.1,
+            model=_model,
         )
-        raw = resp.choices[0].message.content.strip()
+        logger.info(f"[QUAL] host={_HOST} model={_model} is_pro={is_pro}")
         result = _safe_json(raw)
         if result:
-            # Koreksi risk level dengan scoring logic kita
+            # Koreksi risk level dengan scoring logic
+            high_count = 0
+            medium_count = 0
             for r in result.get("risks",[]):
-                llm_lvl  = r.get("level","Medium")
-                scored   = score_risk(r.get("title",""), r.get("desc",""))
-                prio     = {"High":3,"Medium":2,"Low":1}
+                llm_lvl = str(r.get("level","Medium")).strip()
+                scored  = score_risk(r.get("title",""), r.get("desc",""))
+                prio    = {"High":3,"Medium":2,"Low":1}
                 # Ambil yang lebih rendah — hindari inflate ke High
-                r["level"] = scored if prio.get(scored,2) < prio.get(llm_lvl,2) else llm_lvl
+                final_lvl = scored if prio.get(scored,2) < prio.get(llm_lvl,2) else llm_lvl
+                r["level"] = final_lvl
+                if final_lvl == "High":   high_count += 1
+                elif final_lvl == "Medium": medium_count += 1
+
+            # PAKSA OVERALL RISK LEVEL menjadi 1 kata mutlak
+            if high_count >= 2:
+                result["overall_risk_level"] = "High"
+            elif high_count == 1 or medium_count >= 2:
+                result["overall_risk_level"] = "Medium"
+            else:
+                result["overall_risk_level"] = "Low"
             return result
 
         # Repair JSON terpotong
