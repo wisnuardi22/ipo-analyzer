@@ -1,7 +1,6 @@
 """
 gemini_service.py - IPO Analyzer
-Arsitektur: 1 LLM CALL per analisis (hemat maksimal).
-Financial + Qualitative digabung dalam 1 prompt.
+Revisi: Wajib Bahasa Inggris, KPI (ROA, ROE, ROI, DER), 1 Warna Risiko, Format Angka Murni
 """
 from __future__ import annotations
 import json, logging, math, os, re, socket, time
@@ -13,13 +12,33 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 logger = logging.getLogger(__name__)
 
 client = OpenAI(api_key=os.environ.get("SUMOPOD_API_KEY"), base_url="https://ai.sumopod.com/v1")
+
+def _call_llm(messages, max_tokens=4000, temperature=0.0, retries=4, model=None):
+    _model = model or MODEL_FLASH
+    for attempt in range(retries):
+        try:
+            resp = client.chat.completions.create(
+                model=_model, temperature=temperature,
+                max_tokens=max_tokens, messages=messages,
+            )
+            return resp.choices[0].message.content.strip()
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "rate" in err.lower() or "cooling" in err.lower():
+                wait = 15 * (attempt + 1)
+                logger.warning(f"Sumopod Rate limit hit, wait {wait}s: {err[:100]}")
+                time.sleep(wait)
+            else:
+                raise
+    raise Exception("Rate limit: server terlalu sibuk. Coba lagi dalam beberapa menit.")
+
 MODEL_FLASH = "gemini/gemini-2.5-flash"
 MODEL_PRO   = "gemini/gemini-2.5-pro"
 MODEL       = MODEL_FLASH
 _HOST       = socket.gethostname()
 
 # ══════════════════════════════════════════
-# 1. UTILS
+# 1. UTILS (Format Angka Anti-Hancur)
 # ══════════════════════════════════════════
 def parse_num(raw):
     if raw is None: return None
@@ -61,13 +80,8 @@ def calc_growth(cur, prev):
     if c is None or p is None or p==0: return None
     return round((c-p)/abs(p)*100,2)
 
-def fmt_idr(v):
-    if v>=1_000_000_000_000: return f"Rp {v/1_000_000_000_000:.2f} Triliun"
-    if v>=1_000_000_000:     return f"Rp {v/1_000_000_000:.2f} Miliar"
-    return f"Rp {v:,.0f}".replace(",",".")
-
 # ══════════════════════════════════════════
-# 2. METADATA (pure Python, no LLM)
+# 2. METADATA
 # ══════════════════════════════════════════
 def detect_currency(text):
     t = text[:5000].lower()
@@ -84,7 +98,8 @@ def detect_fx_rate(text):
     for pat in [r"kurs.*?rp\s*([\d.,]+)\s*per\s*1\s*(?:dollar|dolar|us\$|usd)",r"rp\s*([\d.,]+)\s*/\s*us\$"]:
         m = re.search(pat, text[:20000], re.I)
         if m:
-            v = parse_num(m.group(1)); return float(v) if v and v>1000 else None
+            v = parse_num(m.group(1))
+            if v and v>1000: return float(v)
     return None
 
 def is_bank(text):
@@ -92,10 +107,44 @@ def is_bank(text):
     return any(k in t for k in ["bank ","perbankan","banking","simpanan","giro","deposito","tabungan","nim ","car "])
 
 # ══════════════════════════════════════════
-# 3. SAFE JSON PARSER
+# 3. PENGUATAN FINANCIAL EXTRACTION 
 # ══════════════════════════════════════════
+_FIN_SYSTEM = """You are a senior financial analyst. Extract financial data from the Indonesian IPO prospectus.
+Output EXACTLY pure JSON, no other text.
+
+INSTRUCTIONS - Read carefully:
+
+A. INCOME STATEMENT (Look for "IKHTISAR DATA KEUANGAN" or "LAPORAN LABA RUGI")
+   For EACH year, extract:
+   - pendapatan: Net Revenue / Total Pendapatan. BE AGGRESSIVE in finding this.
+   - laba_kotor: Gross Profit / Laba Kotor. If missing, calculate: Pendapatan - Beban Pokok Pendapatan. (null for banks).
+   - laba_usaha: Operating Profit / Laba Usaha.
+   - laba_bersih: Net Profit / Laba Tahun Berjalan.
+   - depresiasi: Depreciation & Amortization.
+
+B. NERACA / BALANCE SHEET (LAST YEAR ONLY):
+   total_ekuitas (Total Equity), total_liabilitas (Total Liabilities), total_aset (Total Assets)
+
+C. KEY RATIOS (Look for "RASIO KEUANGAN"):
+   Copy exactly per year:
+   - roa: Return on Asset (%)
+   - roe: Return on Equity (%)
+   - roi: Return on Investment / ROIC (%)
+   - der: Debt to Equity Ratio (x)
+
+D. IPO INFO:
+   total_saham_beredar: Total shares AFTER IPO (angka saja).
+   harga_penawaran: Offering price (angka saja).
+
+E. SATUAN (Unit): "jutaan"/"ribuan"/"miliar"/"full".
+
+OUTPUT FORMAT:
+{"satuan":"jutaan","mata_uang":"IDR","tahun_tersedia":["2021","2022","2023"],
+"data_per_tahun":[{"tahun":"2021","pendapatan":null,"laba_kotor":null,"laba_usaha":null,"laba_bersih":null,"depresiasi":null}],
+"rasio_per_tahun":[{"tahun":"2021","roa":null,"roe":null,"roi":null,"der":null}],
+"total_ekuitas":null,"total_liabilitas":null,"total_aset":null,"total_saham_beredar":null,"harga_penawaran":null}"""
+
 def _safe_json(raw):
-    if not raw: return None
     raw = raw.strip()
     if "```" in raw:
         for part in raw.split("```"):
@@ -104,189 +153,56 @@ def _safe_json(raw):
     s, e = raw.find("{"), raw.rfind("}")
     if s==-1 or e<=s: return None
     snippet = raw[s:e+1]
-    for attempt in [snippet, re.sub(r",\s*([}\]])",r"\1",snippet)]:
-        try: return json.loads(attempt)
-        except: pass
-    return None
+    try: return json.loads(snippet)
+    except:
+        try: return json.loads(re.sub(r",\s*([}\]])",r"\1",snippet))
+        except: return None
+
+def llm_extract_financials(text: str) -> Dict:
+    n = len(text)
+    start = max(0, int(n * 0.20))
+    end   = min(n, int(n * 0.85))
+    core  = text[start:end]
+
+    if len(core) > 80000:
+        chunk = core[:80000]
+    else:
+        chunk = core
+
+    try:
+        raw = _call_llm(
+            messages=[
+                {"role":"system","content":_FIN_SYSTEM},
+                {"role":"user","content":f"PROSPECTUS DOCUMENT:\n\n{chunk}"},
+            ],
+            max_tokens=4000, temperature=0.0,
+            model=MODEL_FLASH, 
+        )
+        return _safe_json(raw) or {}
+    except Exception as e:
+        logger.error(f"FIN error: {e}")
+        return {}
 
 # ══════════════════════════════════════════
-# 4. SINGLE LLM CALL — MEGA PROMPT
+# 4. NORMALIZE + 4 KPI UTAMA (ROA, ROE, ROI, DER)
 # ══════════════════════════════════════════
-def _call_llm_once(prompt: str, model: str, max_tokens: int) -> str:
-    """
-    1 LLM call dengan retry untuk rate limit.
-    Tidak ada loop, tidak ada multi-chunk.
-    """
-    for attempt in range(4):
-        try:
-            logger.info(f"[LLM] attempt={attempt+1} model={model} max_tok={max_tokens} host={_HOST}")
-            resp = client.chat.completions.create(
-                model=model,
-                temperature=0.1,
-                max_tokens=max_tokens,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            result = resp.choices[0].message.content.strip()
-            logger.info(f"[LLM] OK len={len(result)}")
-            return result
-        except Exception as e:
-            err = str(e)
-            if "429" in err or "cooling" in err.lower() or "rate" in err.lower():
-                wait = 30 * (attempt + 1)
-                logger.warning(f"[LLM] Rate limit attempt {attempt+1}/4, tunggu {wait}s")
-                time.sleep(wait)
-            else:
-                logger.error(f"[LLM] Error: {err[:200]}")
-                raise
-    raise Exception("Rate limit: server sibuk, coba lagi dalam beberapa menit.")
+def normalize_and_compute(fin_raw: Dict, fx_rate, is_banking=False):
+    unit     = (fin_raw.get("satuan") or "full").lower()
+    currency = (fin_raw.get("mata_uang") or "IDR").upper()
 
-# ══════════════════════════════════════════
-# 5. MEGA PROMPT — semua dalam 1 call
-# ══════════════════════════════════════════
-def _build_mega_prompt(text: str, lang: str, is_pro: bool, is_banking: bool,
-                       currency: str, unit: str) -> str:
-    is_en     = lang.upper() == "EN"
-    lang_note = "ALL text fields MUST be in ENGLISH." if is_en else "SEMUA field teks WAJIB dalam BAHASA INDONESIA."
-    bank_note = "\nPERHATIAN - INI ADALAH BANK: Tidak ada Gross Profit/Margin. Gunakan NIM/CAR/NPL/BOPO." if is_banking else ""
-    doc_len   = 250000 if is_pro else 160000
-    risk_count = "5-6" if is_pro else "4-5"
-    benefit_count = "5-6" if is_pro else "3-4"
-
-    doc_excerpt = text[:doc_len]
-
-    prompt = f"""Kamu adalah analis IPO senior Indonesia dengan keahlian akuntansi dan investasi.
-{lang_note}{bank_note}
-
-TUGAS: Analisis LENGKAP prospektus IPO berikut dalam SATU output JSON.
-Baca dokumen dengan SANGAT TELITI. Semua data harus AKURAT sesuai dokumen.
-
-═══════════════════════════════════════
-BAGIAN A — DATA KEUANGAN
-═══════════════════════════════════════
-1. Cari tabel "IKHTISAR DATA KEUANGAN PENTING" / "LAPORAN LABA RUGI" / "SELECTED FINANCIAL DATA"
-   Baca header kolom → itulah tahun-tahun yang tersedia (pakai tahun PERSIS dari dokumen)
-   Untuk SETIAP tahun, ekstrak:
-   - pendapatan: Total Pendapatan / Net Revenue / Penjualan Bersih / Pendapatan Bunga Bersih (bank)
-   - laba_kotor: Laba Kotor / Gross Profit (NULL untuk bank)
-   - laba_usaha: Laba/Rugi Usaha / Operating Profit (BOLEH NEGATIF)
-   - laba_bersih: Laba/Rugi Bersih / Net Profit (BOLEH NEGATIF)
-   - depresiasi: Depresiasi & Amortisasi
-
-2. Cari tabel "RASIO KEUANGAN PENTING" / "KEY FINANCIAL RATIOS"
-   SALIN PERSIS angka yang tertulis, jangan hitung sendiri:
-   - roe: ROE / Imbal Hasil Ekuitas (%)
-   - roa: ROA / Return on Asset (%)
-   - der: DER / Debt to Equity (NULL untuk bank)
-   - npm: Net Profit Margin (%)
-   - eps: EPS / Laba per Saham (Rp)
-   - car: Capital Adequacy Ratio % (BANK ONLY)
-   - npl: Non Performing Loan % (BANK ONLY)
-   - nim: Net Interest Margin % (BANK ONLY)
-   - bopo: BOPO / Cost to Income % (BANK ONLY)
-
-3. Neraca (TAHUN TERAKHIR): total_ekuitas, total_liabilitas, total_aset
-
-4. IPO info: total_saham_beredar (setelah IPO), harga_penawaran (angka saja, null jika DRHP)
-
-SATUAN: "{unit}" (baca dari header tabel). Angka dalam kurung = negatif: (1.234) → -1234
-
-═══════════════════════════════════════
-BAGIAN B — ANALISIS KUALITATIF
-═══════════════════════════════════════
-5. IDENTITAS: company_name (lengkap+Tbk), ticker (cari "Kode Saham:"), sector, ipo_date, share_price (exact string), total_shares (exact string), market_cap (hitung dari saham×harga atau tulis N/A)
-
-6. SUMMARY: 1 paragraf {'English' if is_en else 'Bahasa Indonesia'} — profil + IPO info (max 4 kalimat)
-
-7. USE OF PROCEEDS — WAJIB AKURAT:
-   Cari "Rencana Penggunaan Dana" / "Use of Proceeds"
-   - category: nama PERSIS dari dokumen
-   - description: DETAIL dengan nilai nominal (misal: "Rp 215 miliar untuk akuisisi 99,99% PT XYZ")
-   - allocation: persentase PERSIS (total HARUS = 100)
-   Min 2 item, max 6 item. JANGAN generik.
-
-8. UNDERWRITER: lead (nama lengkap), others (array kosong [] jika tidak ada), type ("Full Commitment"/"Best Efforts"), reputation (1-2 kalimat)
-
-9. RISK FACTORS — WAJIB BERVARIASI:
-   Cari bab "Faktor Risiko"
-   Ekstrak {risk_count} risiko TERPENTING. Aturan level KETAT:
-   - "High": HANYA jika ancam kelangsungan bisnis langsung:
-     * Pencabutan izin usaha * Going concern doubt
-     * 1 pelanggan >50% revenue * Gagal bayar material
-     * Akuisisi kritis tidak dapat dilaksanakan
-   - "Medium": Risiko signifikan tapi manageable:
-     * Ketergantungan teknologi * Persaingan * Regulasi
-     * Risiko kredit/NPL * SDM/manajemen * Operasional
-   - "Low": Risiko pasar umum minor:
-     * Volatilitas harga saham * FX exposure kecil
-     * Force majeure * Kondisi makro umum
-   DISTRIBUSI NORMAL: 0-2 High, 2-3 Medium, 1-2 Low
-   Nilai setiap prospektus SECARA INDEPENDEN berdasarkan kondisi SPESIFIK perusahaan ini.
-   overall_risk_level: PILIH SATU KATA SAJA: "High" atau "Medium" atau "Low"
-   overall_risk_reason: 2 kalimat fakta spesifik perusahaan ini
-
-10. BENEFITS: {benefit_count} keunggulan dari "Keunggulan Kompetitif" dengan data konkret
-
-═══════════════════════════════════════
-OUTPUT FORMAT — JSON MURNI, TIDAK ADA TEKS LAIN
-═══════════════════════════════════════
-{{
-  "financial": {{
-    "satuan": "{unit}",
-    "mata_uang": "{currency}",
-    "tahun_tersedia": ["TAHUN_A","TAHUN_B"],
-    "data_per_tahun": [
-      {{"tahun":"TAHUN_A","pendapatan":null,"laba_kotor":null,"laba_usaha":null,"laba_bersih":null,"depresiasi":null}}
-    ],
-    "rasio_per_tahun": [
-      {{"tahun":"TAHUN_A","roe":null,"roa":null,"der":null,"npm":null,"eps":null,"car":null,"npl":null,"nim":null,"bopo":null}}
-    ],
-    "total_ekuitas": null,
-    "total_liabilitas": null,
-    "total_aset": null,
-    "total_saham_beredar": null,
-    "harga_penawaran": null
-  }},
-  "company_name": "",
-  "ticker": "",
-  "sector": "",
-  "ipo_date": "",
-  "share_price": "",
-  "total_shares": "",
-  "market_cap": "",
-  "summary": "",
-  "use_of_funds": [{{"category":"","description":"detail nominal","allocation":70}}],
-  "underwriter": {{"lead":"","others":[],"type":"Full Commitment","reputation":""}},
-  "overall_risk_level": "Medium",
-  "overall_risk_reason": "",
-  "risks": [
-    {{"level":"High","title":"","desc":""}},
-    {{"level":"Medium","title":"","desc":""}},
-    {{"level":"Low","title":"","desc":""}}
-  ],
-  "benefits": [{{"title":"","desc":""}}]
-}}
-
-DOKUMEN PROSPEKTUS:
-{doc_excerpt}"""
-
-    return prompt
-
-# ══════════════════════════════════════════
-# 6. KPI COMPUTATION (pure Python)
-# ══════════════════════════════════════════
-def _compute_kpi(fin_section: Dict, fx_rate, is_banking: bool, currency: str, unit: str):
     years_data = []
-    for d in fin_section.get("data_per_tahun",[]):
+    for d in fin_raw.get("data_per_tahun",[]):
         nd = dict(d)
         for k in ("pendapatan","laba_kotor","laba_usaha","laba_bersih","depresiasi"):
             nd[k] = apply_unit(nd.get(k),unit) if nd.get(k) is not None else None
         years_data.append(nd)
     years_data.sort(key=lambda x: str(x.get("tahun","")))
 
-    ekuitas    = apply_unit(fin_section.get("total_ekuitas"), unit)
-    liabilitas = apply_unit(fin_section.get("total_liabilitas"), unit)
-    saham      = parse_num(fin_section.get("total_saham_beredar"))
-    harga      = parse_num(fin_section.get("harga_penawaran"))
+    ekuitas    = apply_unit(fin_raw.get("total_ekuitas"),unit)
+    liabilitas = apply_unit(fin_raw.get("total_liabilitas"),unit)
+    aset       = apply_unit(fin_raw.get("total_aset"),unit)
+    saham      = parse_num(fin_raw.get("total_saham_beredar"))
+    harga      = parse_num(fin_raw.get("harga_penawaran"))
     harga_idr  = harga*fx_rate if (harga and currency=="USD" and fx_rate) else harga
 
     rev_growth, gross_m, op_m, ebitda_m, net_m = [],[],[],[],[]
@@ -305,89 +221,111 @@ def _compute_kpi(fin_section: Dict, fx_rate, is_banking: bool, currency: str, un
         ebitda_m.append({"year":y,"value":to_pct(safe_div(float(op)+float(dep),rev)) if (dep is not None and op is not None and rev) else None})
         net_m.append({"year":y,"value":to_pct(safe_div(net,rev))})
 
-    kpi = {"pe":"N/A","pb":"N/A","roe":"N/A","der":"N/A","eps":"N/A","market_cap":"N/A",
-           "roe_by_year":{},"der_by_year":{},"eps_by_year":{},"extra_by_year":{}}
+    # FOKUS PADA 4 KPI: ROA, ROE, ROI, DER
+    kpi = {"roa":"N/A","roe":"N/A","roi":"N/A","der":"N/A"}
     laba_last = years_data[-1].get("laba_bersih") if years_data else None
 
-    rasio_list = fin_section.get("rasio_per_tahun",[])
+    rasio_list = fin_raw.get("rasio_per_tahun",[])
     has_rasio  = bool(rasio_list)
     if has_rasio:
-        for r in rasio_list:
-            y = str(r.get("tahun","")).strip()
-            if not y: continue
-            for field, key in [("roe","roe_by_year"),("der","der_by_year"),("eps","eps_by_year")]:
-                v = parse_num(r.get(field))
-                if v is not None: kpi[key][y] = v
-            extra = {f: parse_num(r.get(f)) for f in ("car","npl","nim","bopo","roa") if parse_num(r.get(f)) is not None}
-            if extra: kpi["extra_by_year"][y] = extra
-        last_r = rasio_list[-1] if rasio_list else {}
-        for field, kkey, fmt in [("roe","roe","{:.2f}%"),("der","der","{:.2f}x"),("eps","eps","Rp {:.2f}")]:
+        last_r = rasio_list[-1]
+        for field, fmt in [("roa","{:.2f}%"),("roe","{:.2f}%"),("roi","{:.2f}%"),("der","{:.2f}x")]:
             v = parse_num(last_r.get(field))
-            if v is not None: kpi[kkey] = fmt.format(v)
+            if v is not None: kpi[field] = fmt.format(v)
 
+    # Fallback Perhitungan Manual jika AI tidak menemukan rasio di tabel
     try:
-        if saham and laba_last and saham>0 and kpi["eps"]=="N/A":
-            ev = laba_last/saham; kpi["eps"] = f"Rp {ev:,.2f}".replace(",",".")
-            if harga_idr and ev>0:  kpi["pe"] = f"{harga_idr/ev:.1f}x"
-            elif harga_idr and ev<0: kpi["pe"] = "N/A (Rugi)"
-    except: pass
-    try:
-        if ekuitas and saham and saham>0 and harga_idr and ekuitas>0:
-            bv = ekuitas/saham
-            if bv>0: kpi["pb"] = f"{harga_idr/bv:.2f}x"
-    except: pass
-    try:
-        if not has_rasio and ekuitas and laba_last and ekuitas>0 and kpi["roe"]=="N/A":
+        if kpi["roa"] == "N/A" and laba_last and aset and aset > 0:
+            kpi["roa"] = f"{laba_last/aset*100:.2f}%"
+        if kpi["roe"] == "N/A" and laba_last and ekuitas and ekuitas > 0:
             kpi["roe"] = f"{laba_last/ekuitas*100:.2f}%"
-    except: pass
-    try:
-        if not has_rasio and not is_banking and ekuitas and liabilitas and ekuitas>0 and kpi["der"]=="N/A":
+        if kpi["der"] == "N/A" and liabilitas and ekuitas and ekuitas > 0:
             kpi["der"] = f"{liabilitas/ekuitas:.2f}x"
+        # ROI secara manual seringkali diaproksimasi dengan Laba Bersih / (Ekuitas + Liabilitas Jangka Panjang)
+        # Jika tidak ada, kita asumsikan N/A atau samakan dengan ROA jika disetujui (disini kita biarkan N/A agar akurat)
     except: pass
+
+    market_cap_num = None
     try:
         if saham and harga and saham>0 and harga>0:
-            kpi["market_cap"] = fmt_idr(saham*(harga_idr if harga_idr else harga))
+            market_cap_num = saham * (harga_idr if harga_idr else harga)
     except: pass
 
-    financial = {
+    # Return pure numbers for the structural fields to avoid frontend breaks
+    structural_data = {
+        "offering_price_num": harga,
+        "total_shares_num": saham,
+        "market_cap_num": market_cap_num
+    }
+
+    return {
         "currency":currency,"years":[str(d.get("tahun","")) for d in years_data],
         "rasio_per_tahun":rasio_list,"absolute_data":years_data,"is_banking":is_banking,
         "revenue_growth":rev_growth or None,"gross_margin":gross_m or None,
         "operating_margin":op_m or None,"ebitda_margin":ebitda_m or None,
         "net_profit_margin":net_m or None,
-    }
-    return financial, kpi
+    }, kpi, structural_data
 
 # ══════════════════════════════════════════
-# 7. RISK SCORING
+# 5. QUALITATIVE - WAJIB ENGLISH & 1 WARNA RISIKO
 # ══════════════════════════════════════════
-_HIGH_SIGNALS = [
-    "pencabutan izin","going concern","gagal bayar","pailit",
-    r"satu pelanggan.*\d{2,3}%",r"konsentrasi.*>\s*40%",
-    "perubahan status pma","akuisisi.*tidak dapat dilaksanakan",
-    "tidak dapat mempertahankan izin","license revocation",
-    "material adverse","substantial doubt",
-]
-_LOW_SIGNALS = [
-    "harga saham","likuiditas saham","volatilitas pasar modal",
-    "share price","market liquidity","force majeure",
-    "bencana alam","pandemi","kondisi ekonomi makro secara umum",
-]
+def llm_qualitative(text: str, kpi: Dict, financial: Dict, is_pro: bool=False) -> Dict:
+    doc_limit = 150000 if is_pro else 90000
+    max_tok   = 8000   if is_pro else 5000
 
-def score_risk(title: str, desc: str) -> str:
-    text = (title + " " + (desc or "")).lower()
-    for sig in _HIGH_SIGNALS:
-        if re.search(sig, text): return "High"
-    low_count = sum(1 for s in _LOW_SIGNALS if re.search(s, text))
-    if low_count >= 1: return "Low"
-    return "Medium"
+    prompt = f"""You are an expert IPO analyst. 
+CRITICAL RULE: ALL OUTPUT MUST BE IN STRICT ENGLISH. DO NOT USE INDONESIAN.
+
+DATA (Do not change): {json.dumps(kpi, ensure_ascii=False)}
+
+TASKS:
+A. IDENTITY: company_name (Full + Tbk), ticker (find "Kode Saham:"), sector, ipo_date.
+B. SUMMARY: 1 high-level paragraph in English outlining the company profile and IPO details.
+C. USE OF PROCEEDS:
+   Extract "Rencana Penggunaan Dana" / "Use of Proceeds".
+   - category: exact name
+   - description: detailed description with nominal values (e.g. Rp X billion)
+   - allocation: Exact percentage (total must = 100).
+D. UNDERWRITER: lead (full name), others (array), type ("Full Commitment" or "Best Efforts"), reputation (1 sentence).
+
+E. HIGH-LEVEL RISK ANALYSIS (ONE COLOR ONLY):
+   - overall_risk_level: Choose ONLY ONE for the entire company: "High", "Medium", or "Low".
+   - overall_risk_analysis: 1 comprehensive paragraph explaining the primary risks and why you chose that level.
+   - risks: An array of 4-5 key risk bullet points (STRINGS ONLY, NO INDIVIDUAL LEVELS/COLORS).
+   
+F. BENEFITS: 3-4 specific advantages based on concrete data from the prospectus.
+
+DOCUMENT:
+{text[:doc_limit]}
+
+OUTPUT JSON FORMAT (STRICTLY ENGLISH):
+{{"company_name":"","ticker":"","sector":"","ipo_date":"",
+"summary":"",
+"use_of_funds":[{{"category":"","description":"","allocation":70}}],
+"underwriter":{{"lead":"","others":[],"type":"Full Commitment","reputation":""}},
+"overall_risk_level":"Medium",
+"overall_risk_analysis":"The overall risk is medium, primarily driven by...",
+"risks":["Risk of failure in acquisition...", "Dependence on major customers...", "Intense business competition..."],
+"benefits":[{{"title":"Market Leader","desc":"Holds 40% market share..."}}]}}"""
+
+    try:
+        _model = MODEL_PRO if is_pro else MODEL_FLASH
+        raw = _call_llm(
+            messages=[{"role":"user","content":prompt}],
+            max_tokens=max_tok, temperature=0.1,
+            model=_model,
+        )
+        return _safe_json(raw) or {}
+    except Exception as e:
+        logger.error(f"LLM qualitative error: {e}")
+        raise ValueError(f"Analysis failed: {e}")
 
 # ══════════════════════════════════════════
-# 8. TICKER SEARCH
+# 6. TICKER SEARCH
 # ══════════════════════════════════════════
 def search_ticker(company_name: str) -> str:
     import requests
-    EXCLUDE = {"PT","TBK","IDX","BEI","OJK","IDR","USD","IPO","ROE","DER","EPS"}
+    EXCLUDE = {"PT","TBK","IDX","BEI","OJK","IDR","USD","IPO"}
     def clean(n):
         n = re.sub(r"\bPT\.?\s*","",n,flags=re.I)
         n = re.sub(r"\bTbk\.?\b","",n,flags=re.I)
@@ -396,92 +334,62 @@ def search_ticker(company_name: str) -> str:
     if not cleaned: return ""
     try:
         resp = requests.get("https://query2.finance.yahoo.com/v1/finance/search",
-            params={"q":cleaned,"lang":"id","region":"ID","quotesCount":10,"newsCount":0},
+            params={"q":cleaned,"lang":"en","region":"US","quotesCount":5,"newsCount":0},
             headers={"User-Agent":"Mozilla/5.0"}, timeout=8)
         for q in resp.json().get("quotes",[]):
             sym = q.get("symbol","")
             if sym.endswith(".JK"):
                 t = sym.replace(".JK","").upper()
-                if t not in EXCLUDE and 2<=len(t)<=6: return t
+                if t not in EXCLUDE and 2<=len(t)<=6:
+                    return t
     except: pass
     return ""
 
 # ══════════════════════════════════════════
-# 9. MAIN — 1 LLM CALL TOTAL
+# 7. MAIN LOGIC
 # ══════════════════════════════════════════
-def analyze_prospectus(text: str, lang: str="ID", model: str=None) -> dict:
-    lang     = (lang or "ID").upper()
-    is_pro   = (model == MODEL_PRO)
-    banking  = is_bank(text)
+def analyze_prospectus(text: str, lang: str="EN", model: str=None) -> dict:
+    is_pro  = (model == "gemini/gemini-2.5-pro")
+    banking = is_bank(text)
+    
+    fx_rate  = detect_fx_rate(text)
     currency = detect_currency(text)
     unit     = detect_unit(text)
-    fx_rate  = detect_fx_rate(text)
 
-    logger.info(f"[START] host={_HOST} lang={lang} is_pro={is_pro} len={len(text)} banking={banking} unit={unit}")
+    # 1. Financial LLM Call
+    fin_raw = llm_extract_financials(text)
+    if not fin_raw.get("satuan"):    fin_raw["satuan"]    = unit
+    if not fin_raw.get("mata_uang"): fin_raw["mata_uang"] = currency
 
-    # ── SATU LLM CALL ─────────────────────
-    _model   = MODEL_PRO if is_pro else MODEL_FLASH
-    max_tok  = 12000 if is_pro else 8000
-    prompt   = _build_mega_prompt(text, lang, is_pro, banking, currency, unit)
+    financial, kpi, structural = normalize_and_compute(fin_raw, fx_rate, is_banking=banking)
 
-    raw      = _call_llm_once(prompt, model=_model, max_tokens=max_tok)
-    parsed   = _safe_json(raw)
+    logger.info("Anti Rate Limit Sumopod: Waiting 15s...")
+    time.sleep(15)
 
-    if not parsed:
-        # Coba repair JSON terpotong
-        fixed = re.sub(r",\s*([}\]])",r"\1",raw)
-        s = fixed.find("{")
-        if s != -1:
-            snippet = fixed[s:]
-            ob = max(0, snippet.count("{") - snippet.count("}"))
-            ol = max(0, snippet.count("[") - snippet.count("]"))
-            closed = snippet + ("]"*ol) + ("}"*ob)
-            parsed = _safe_json(closed)
-    if not parsed:
-        raise ValueError(f"Gagal parse JSON dari LLM: {raw[:300]}")
+    # 2. Qualitative LLM Call (Always English now)
+    result = llm_qualitative(text, kpi, financial, is_pro=is_pro)
+    
+    # 3. Compile final response ensuring numbers aren't broken
+    result["financial"] = financial
+    result["kpi"]       = kpi
+    
+    # Force strict formatting for frontend reliability
+    result["offering_price"] = structural["offering_price_num"]
+    result["total_shares"]   = structural["total_shares_num"]
+    result["market_cap"]     = structural["market_cap_num"]
 
-    # ── EXTRACT FINANCIAL SECTION ──────────
-    fin_section = parsed.pop("financial", {})
-    fin_section.setdefault("satuan", unit)
-    fin_section.setdefault("mata_uang", currency)
-
-    # ── COMPUTE KPI (pure Python) ──────────
-    financial, kpi = _compute_kpi(fin_section, fx_rate, banking, currency, unit)
-    logger.info(f"[KPI] {json.dumps(kpi, ensure_ascii=False)}")
-
-    # ── ATTACH ────────────────────────────
-    parsed["financial"] = financial
-    parsed["kpi"]       = kpi
-
-    # ── RISK SCORING KOREKSI ──────────────
-    high_count = medium_count = 0
-    for r in parsed.get("risks",[]):
-        llm_lvl   = str(r.get("level","Medium")).strip().capitalize()
-        scored    = score_risk(r.get("title",""), r.get("desc",""))
-        prio      = {"High":3,"Medium":2,"Low":1}
-        final_lvl = scored if prio.get(scored,2) < prio.get(llm_lvl,2) else llm_lvl
-        r["level"] = final_lvl
-        if final_lvl == "High":    high_count += 1
-        elif final_lvl == "Medium": medium_count += 1
-
-    # Paksa overall_risk_level jadi 1 kata
-    if high_count >= 2:   parsed["overall_risk_level"] = "High"
-    elif high_count == 1 or medium_count >= 2: parsed["overall_risk_level"] = "Medium"
-    else:                 parsed["overall_risk_level"] = "Low"
-
-    # ── TICKER ────────────────────────────
-    ticker = str(parsed.get("ticker") or "").strip().upper()
-    if not ticker or not re.match(r"^[A-Z]{2,6}$", ticker):
-        company = parsed.get("company_name","")
+    ticker = str(result.get("ticker") or "").strip().upper()
+    if not ticker or not re.match(r"^[A-Z]{2,6}$",ticker):
+        company = result.get("company_name","")
         if company: ticker = search_ticker(company)
-        parsed["ticker"] = ticker
+        result["ticker"] = ticker
 
-    # ── VALIDASI UoF ──────────────────────
-    uof = parsed.get("use_of_funds",[])
+    # Normalize Use of Funds percentage
+    uof = result.get("use_of_funds",[])
     if uof:
         total = sum(float(x.get("allocation") or 0) for x in uof)
         if 0 < total < 95 or total > 105:
-            for item in uof: item["allocation"] = round(float(item.get("allocation") or 0)/total*100,2)
+            for item in uof:
+                item["allocation"] = round(float(item.get("allocation") or 0)/total*100,2)
 
-    logger.info(f"[DONE] company={parsed.get('company_name','')} ticker={parsed.get('ticker','')} risks={len(parsed.get('risks',[]))}")
-    return parsed
+    return result
