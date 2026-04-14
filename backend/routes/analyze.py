@@ -35,13 +35,11 @@ def run_analysis(
     logger.info(f"[ANALYZE] id={analysis_id} lang={lang} plan={plan} model={model}")
 
     # GUARD: Cek apakah sudah dianalisis dengan plan & lang yang sama
-    # Ini mencegah pemborosan token jika frontend memanggil ulang tanpa perlu
     if analysis.ipo_details:
         try:
             existing = json.loads(analysis.ipo_details)
             existing_plan = existing.get("plan","basic").lower()
             existing_lang = existing.get("lang","ID").upper()
-            # Skip jika sudah ada hasil dengan plan & lang yang sama
             if existing_plan == plan and existing_lang == lang and analysis.summary:
                 logger.info(f"[SKIP] Analisis sudah ada untuk id={analysis_id} plan={plan} lang={lang}, skip LLM call")
                 return {
@@ -62,29 +60,32 @@ def run_analysis(
     try:
         result = analyze_prospectus(analysis.raw_text, lang=lang, model=model)
 
-        fin = result.get("financial", {})
-        kpi = result.get("kpi", {})
+        fin = result.get("financial") or {}
+        kpi = result.get("kpi") or {}
         logger.info(f"[DEBUG] company={result.get('company_name','')} years={fin.get('years',[])} rasio={len(fin.get('rasio_per_tahun', []))}")
         logger.info(f"[DEBUG] kpi={json.dumps(kpi, ensure_ascii=False)}")
         logger.info(f"[DEBUG] uof={len(result.get('use_of_funds',[]))} benefits={len(result.get('benefits',[]))}")
 
-        analysis.company_name   = result.get("company_name", analysis.company_name)
-        analysis.summary        = result.get("summary", "")
+        analysis.company_name   = result.get("company_name") or analysis.company_name
+        analysis.summary        = result.get("summary") or ""
         analysis.financial_data = json.dumps(fin)
 
-        overall_risk_level  = result.get("overall_risk_level", "").upper()
-        overall_risk_reason = result.get("overall_risk_reason", "")
+        # Aman dari NoneType error
+        overall_risk_level  = (result.get("overall_risk_level") or "MEDIUM").upper()
+        overall_risk_reason = result.get("overall_risk_reason") or ""
         if overall_risk_level not in ["HIGH","MEDIUM","LOW"]:
             overall_risk_level = "MEDIUM"
 
-        risks       = result.get("risks", [])
-        benefits    = result.get("benefits", [])
-        underwriter = result.get("underwriter", {})
+        risks       = result.get("risks") or []
+        benefits    = result.get("benefits") or []
+        underwriter = result.get("underwriter") or {}
 
         if underwriter:
-            rep = underwriter.get("reputation","").lower()
-            lead = underwriter.get("lead",""); uw_type = underwriter.get("type","")
-            others = underwriter.get("others",[]); others_str = ", ".join(others) if others else ""
+            rep = (underwriter.get("reputation") or "").lower()
+            lead = underwriter.get("lead") or ""
+            uw_type = underwriter.get("type") or ""
+            others = underwriter.get("others") or []
+            others_str = ", ".join(others) if others else ""
             is_good = any(w in rep for w in ["baik","besar","terpercaya","reputable","prominent","established","leading","trusted","experienced"])
             if is_good:
                 if lang == "EN":
@@ -101,8 +102,10 @@ def run_analysis(
         analysis.risks    = json.dumps(risks)
         analysis.benefits = json.dumps(benefits)
 
-        company_name  = result.get("company_name", analysis.company_name)
-        ticker_gemini = result.get("ticker","").strip().upper()
+        company_name  = result.get("company_name") or analysis.company_name
+        # Mencegah NoneType Error saat strip()
+        ticker_gemini = (result.get("ticker") or "").strip().upper()
+        
         if ticker_gemini and re.match(r"^[A-Z]{2,6}$", ticker_gemini):
             ticker = ticker_gemini
             logger.info(f"Ticker dari dokumen: {ticker}")
@@ -117,19 +120,19 @@ def run_analysis(
             try: market = get_market_data(ticker)
             except Exception as e: logger.warning(f"Market data: {e}")
 
-        kpi_data   = result.get("kpi", {})
-        market_cap = market.get("market_cap") or kpi_data.get("market_cap") or result.get("market_cap","")
+        kpi_data   = result.get("kpi") or {}
+        market_cap = market.get("market_cap") or kpi_data.get("market_cap") or result.get("market_cap") or ""
 
         analysis.ipo_details = json.dumps({
             "ticker":              ticker or "",
-            "sector":              result.get("sector",""),
-            "ipo_date":            result.get("ipo_date",""),
-            "share_price":         result.get("share_price",""),
-            "total_shares":        result.get("total_shares",""),
+            "sector":              result.get("sector") or "",
+            "ipo_date":            result.get("ipo_date") or "",
+            "share_price":         result.get("share_price") or "",
+            "total_shares":        result.get("total_shares") or "",
             "market_cap":          market_cap,
-            "current_price":       market.get("current_price",""),
-            "shares_outstanding":  market.get("shares_outstanding",""),
-            "use_of_funds":        result.get("use_of_funds",[]),
+            "current_price":       market.get("current_price") or "",
+            "shares_outstanding":  market.get("shares_outstanding") or "",
+            "use_of_funds":        result.get("use_of_funds") or [],
             "kpi":                 kpi_data,
             "underwriter":         underwriter,
             "overall_risk_level":  overall_risk_level,

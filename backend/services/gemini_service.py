@@ -122,7 +122,8 @@ def _call_llm_once(prompt: str, model: str, max_tokens: int) -> str:
                 max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}],
             )
-            out = resp.choices[0].message.content.strip()
+            # Aman dari NoneType
+            out = (resp.choices[0].message.content or "").strip()
             logger.info(f"[LLM] OK len={len(out)}")
             return out
         except Exception as e:
@@ -341,7 +342,7 @@ def _compute_kpi(fin_section: Dict, fx_rate, is_banking: bool, currency: str, un
     has_rasio  = bool(rasio_list)
     if has_rasio:
         for r in rasio_list:
-            y = str(r.get("tahun","")).strip()
+            y = str(r.get("tahun") or "").strip()
             if not y: continue
             for field, key in [("roe","roe_by_year"),("roa","roa_by_year"),
                                 ("der","der_by_year"),("eps","eps_by_year")]:
@@ -497,9 +498,9 @@ def analyze_prospectus(text: str, lang: str="ID", model: str=None) -> dict:
 
     # ── RISK LEVEL CORRECTION ─────────────────────────────
     high_count = medium_count = 0
-    for r in parsed.get("risks", []):
-        llm_lvl   = str(r.get("level","Medium")).strip().capitalize()
-        scored    = score_risk(r.get("title",""), r.get("desc",""))
+    for r in parsed.get("risks") or []:
+        llm_lvl   = str(r.get("level") or "Medium").strip().capitalize()
+        scored    = score_risk(r.get("title") or "", r.get("desc") or "")
         prio      = {"High":3,"Medium":2,"Low":1}
         # Use lower of LLM vs scoring — prevent inflation to High
         final_lvl = scored if prio.get(scored,2) < prio.get(llm_lvl,2) else llm_lvl
@@ -513,14 +514,14 @@ def analyze_prospectus(text: str, lang: str="ID", model: str=None) -> dict:
     else:                                        parsed["overall_risk_level"] = "Low"
 
     # ── TICKER ────────────────────────────────────────────
-    ticker = str(parsed.get("ticker","")).strip().upper()
+    ticker = (parsed.get("ticker") or "").strip().upper()
     if not ticker or not re.match(r"^[A-Z]{2,6}$", ticker):
-        company = parsed.get("company_name","")
+        company = parsed.get("company_name") or ""
         if company: ticker = search_ticker(company)
         parsed["ticker"] = ticker
 
     # ── VALIDATE USE OF FUNDS ─────────────────────────────
-    uof = parsed.get("use_of_funds", [])
+    uof = parsed.get("use_of_funds") or []
     if uof:
         total = sum(float(x.get("allocation") or 0) for x in uof)
         if 0 < total < 95 or total > 105:
