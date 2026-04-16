@@ -594,9 +594,17 @@ const MOCK = {
 };
 
 // ── Format helpers ────────────────────────────────────────────
+// Menghapus teks ejaan di dalam kurung: e.g. "Rp 500 (Lima Ratus)" -> "Rp 500"
+const _cleanText = (val) => {
+  if (!val) return "";
+  return String(val)
+    .replace(/\s*\([^)]*\)/g, "")
+    .trim();
+};
+
 const _fmtPrice = (val) => {
   if (!val) return "";
-  const s = String(val).trim();
+  const s = _cleanText(val);
   if (/^(Rp|USD|\$|US\$)/.test(s)) return s;
   const num = parseFloat(s.replace(/[.,]/g, "").replace(",", "."));
   if (!isNaN(num)) return `Rp ${num.toLocaleString("id-ID")}`;
@@ -605,7 +613,7 @@ const _fmtPrice = (val) => {
 
 const _fmtShares = (val) => {
   if (!val) return "";
-  const s = String(val).trim();
+  const s = _cleanText(val);
   if (/lembar|saham|share/i.test(s))
     return s.replace(/(\d+)(?=(\d{3})+(?!\d))/g, "$1.");
   const numStr = s.replace(/[^0-9]/g, "");
@@ -620,7 +628,7 @@ const _fmtShares = (val) => {
 
 const _fmtMarketCap = (val) => {
   if (!val) return "";
-  const s = String(val).trim();
+  const s = _cleanText(val);
   if (/[TMBtmb]$|triliun|miliar|billion/i.test(s)) return s;
   const numStr = s.replace(/[^0-9]/g, "");
   if (!numStr) return s;
@@ -777,10 +785,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginErr, setLoginErr] = useState("");
-  // ── NEW STATES ──
   const [analysisId, setAnalysisId] = useState(null);
   const [kpiYear, setKpiYear] = useState(null);
-  // null = tahun terakhir (default)
 
   const tvSymbolRef = useRef(null);
   const tvMiniChartRef = useRef(null);
@@ -851,7 +857,6 @@ export default function App() {
     setStatus(l.svc.uploaded);
   };
 
-  // ── ANALYZE ──
   const handleAnalyze = async () => {
     if (!file) return;
     setAnalyzing(true);
@@ -860,7 +865,7 @@ export default function App() {
       const fd = new FormData();
       fd.append("file", file);
       const up = await axios.post(`${API_BASE}/upload`, fd);
-      setAnalysisId(up.data.analysis_id); // ← simpan ID untuk re-analyze
+      setAnalysisId(up.data.analysis_id);
       setStatus(
         lang === "EN"
           ? "AI is analyzing document..."
@@ -896,9 +901,7 @@ export default function App() {
     }
   };
 
-  // ── HANDLE LANG CHANGE — re-analyze jika dashboard sudah tampil ──
   const handleLangChange = (newLang) => {
-    // UI language only — analysis output is always in English
     setLang(newLang);
     if (status) setStatus("");
   };
@@ -1146,7 +1149,6 @@ export default function App() {
               ))}
             </nav>
             <div className="flex items-center gap-3">
-              {/* ── LANG TOGGLE — memanggil handleLangChange ── */}
               <button
                 onClick={() => handleLangChange(lang === "EN" ? "ID" : "EN")}
                 className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 rounded-full text-sm font-bold text-gray-700 dark:text-gray-300 transition-colors"
@@ -1722,7 +1724,6 @@ export default function App() {
                         ? D.financialYears[D.financialYears.length - 1]
                         : null);
 
-                    // getByYear: try year-specific then fallback to global kpi
                     const getByYear = (key, suffix, fallback) => {
                       const byYear =
                         activeYear && D.kpiByYear?.[key]?.[activeYear];
@@ -1731,8 +1732,7 @@ export default function App() {
                       const val =
                         raw !== null
                           ? raw
-                          : // fallback: parse from global kpi string
-                            fallback && fallback !== "N/A"
+                          : fallback && fallback !== "N/A"
                             ? parseFloat(
                                 String(fallback).replace(/[^0-9.-]/g, ""),
                               )
@@ -1751,7 +1751,6 @@ export default function App() {
                       ? D.kpiByYear?.extra?.[activeYear] || {}
                       : {};
 
-                    // KPI: ROE, ROA, DER, EPS (main 4) + bank extras
                     const cards = [
                       {
                         label: "ROE",
@@ -1782,7 +1781,6 @@ export default function App() {
                         note: activeYear || "Latest",
                       },
                     ];
-                    // Bank-specific KPI extras (CAR, NPL, NIM, BOPO)
                     const extraCards =
                       Object.keys(extraKpi).length > 0
                         ? [

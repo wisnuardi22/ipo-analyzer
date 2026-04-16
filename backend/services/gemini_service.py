@@ -122,7 +122,6 @@ def _call_llm_once(prompt: str, model: str, max_tokens: int) -> str:
                 max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}],
             )
-            # Aman dari NoneType
             out = (resp.choices[0].message.content or "").strip()
             logger.info(f"[LLM] OK len={len(out)}")
             return out
@@ -144,9 +143,20 @@ def _build_mega_prompt(text: str, is_pro: bool, is_banking: bool,
                        currency: str, unit: str) -> str:
     bank_note    = "\nIMPORTANT - THIS IS A BANK: No Gross Profit/Margin. Use NIM/CAR/NPL/BOPO instead." if is_banking else ""
     doc_len      = 250000 if is_pro else 160000
-    risk_count   = "5-6" if is_pro else "4-5"
-    benefit_count = "5-6" if is_pro else "3-4"
-    summary_len  = "3-4 sentences covering company profile, business model, and IPO basics" if is_pro else "2-3 sentences covering company profile and IPO basics"
+    
+    # DYNAMIC INSTRUCTIONS BERDASARKAN PLAN
+    if is_pro:
+        risk_count   = "6-8"
+        benefit_count = "5-7"
+        summary_len  = "3-4 sentences covering company profile, deep business model, and IPO basics"
+        uof_desc     = "DEEP DIVE. Include exact nominal amounts, target subsidiaries, and specific project names (e.g. 'Rp 215B for 99.9% acquisition of PT XYZ, Rp 50B for IT infrastructure'). Do NOT be vague."
+        risk_desc    = "Provide DEEP analytical reasoning linking to financial/regulatory impact. YOU MUST evaluate strictly. If there are intense competition, high debt, or severe regulatory threats, classify 1-2 risks as 'High'."
+    else:
+        risk_count   = "4-5"
+        benefit_count = "3-4"
+        summary_len  = "2 sentences covering company profile and IPO basics"
+        uof_desc     = "Brief summary of the purpose (e.g. 'Working capital and expansion')."
+        risk_desc    = "Standard brief descriptions."
 
     return f"""You are a senior IPO analyst with deep expertise in Indonesian capital markets and accounting.
 ALL OUTPUT TEXT MUST BE IN ENGLISH. Numbers, dates, and proper nouns stay as-is.{bank_note}
@@ -192,16 +202,16 @@ SECTION B — QUALITATIVE ANALYSIS (ALL IN ENGLISH)
    - ticker: find "Kode Saham:" in document
    - sector: industry/sector in English
    - ipo_date: listing date as written
-   - share_price: offering price exact string (e.g. "Rp 635")
-   - total_shares: exact string from document
+   - share_price: EXACT NUMERIC VALUE + CURRENCY ONLY (e.g., "Rp 500"). STRICT RULE: DO NOT include spelled-out words in parentheses.
+   - total_shares: EXACT NUMERIC VALUE ONLY (e.g., "5,000,000,000 shares"). STRICT RULE: DO NOT include spelled-out words.
    - market_cap: calculate from shares × price or write "N/A"
 
-6. SUMMARY: {summary_len}. Write in English, be specific with numbers.
+6. SUMMARY: {summary_len}.
 
 7. USE OF PROCEEDS — MUST BE ACCURATE:
    Find "Rencana Penggunaan Dana" / "Use of Proceeds"
    - category: translated to English (e.g. "Working Capital", "Capital Expenditure")
-   - description: DETAILED with exact nominal amounts (e.g. "Rp 215 billion for 99.99% acquisition of PT XYZ")
+   - description: {uof_desc}
    - allocation: EXACT percentage (total MUST equal 100)
    Min 2, max 6 items. NO generic descriptions — each prospectus has unique use of funds.
 
@@ -211,31 +221,12 @@ SECTION B — QUALITATIVE ANALYSIS (ALL IN ENGLISH)
    - type: "Full Commitment" or "Best Efforts"
    - reputation: 1-2 sentences in English about track record
 
-9. RISK FACTORS — MUST HAVE VARIED LEVELS (High/Medium/Low):
+9. RISK FACTORS:
    Find chapter "Faktor Risiko" / "Risk Factors"
-   Extract {risk_count} most important risks.
-
-   LEVEL RULES — STRICT:
-   - "High": ONLY if directly threatens business survival:
-     • License/permit revocation risk
-     • Going concern doubt
-     • Single customer >50% of total revenue
-     • Material debt default risk
-     • Critical acquisition that cannot be completed
-   - "Medium": Significant but manageable operational risks:
-     • Technology/system dependency • Competition pressure
-     • Regulatory changes requiring adaptation
-     • Credit/NPL risk • Key person dependency • Cybersecurity
-   - "Low": General market risks present in most companies:
-     • Share price volatility • Minor FX exposure
-     • Force majeure • General macroeconomic conditions
-
-   DISTRIBUTION: 0-2 High, 2-3 Medium, 1-2 Low
-   Assess this prospectus INDEPENDENTLY — not all companies have the same risk profile.
-   Title and desc MUST be in ENGLISH.
-
+   Extract {risk_count} most important risks. {risk_desc}
+   LEVEL RULES: "High", "Medium", or "Low". 
    overall_risk_level: ONE WORD ONLY — "High", "Medium", or "Low". NEVER combined.
-   overall_risk_reason: 2 sentences with specific financial facts from THIS prospectus.
+   overall_risk_reason: 2 sentences with specific financial facts.
 
 10. BENEFITS: {benefit_count} competitive strengths from "Keunggulan Kompetitif" with concrete data.
     Title and desc in ENGLISH.
@@ -279,7 +270,6 @@ OUTPUT — PURE JSON, NO OTHER TEXT
   "overall_risk_reason": "",
   "risks": [
     {{"level":"High","title":"","desc":""}},
-    {{"level":"Medium","title":"","desc":""}},
     {{"level":"Medium","title":"","desc":""}},
     {{"level":"Low","title":"","desc":""}}
   ],
@@ -500,10 +490,15 @@ def analyze_prospectus(text: str, lang: str="ID", model: str=None) -> dict:
     high_count = medium_count = 0
     for r in parsed.get("risks") or []:
         llm_lvl   = str(r.get("level") or "Medium").strip().capitalize()
-        scored    = score_risk(r.get("title") or "", r.get("desc") or "")
-        prio      = {"High":3,"Medium":2,"Low":1}
-        # Use lower of LLM vs scoring — prevent inflation to High
-        final_lvl = scored if prio.get(scored,2) < prio.get(llm_lvl,2) else llm_lvl
+        
+        # LOGIKA BARU: Jika Pro, kita percaya penuh pada hasil analisis LLM.
+        if is_pro:
+            final_lvl = llm_lvl
+        else:
+            scored    = score_risk(r.get("title") or "", r.get("desc") or "")
+            prio      = {"High":3,"Medium":2,"Low":1}
+            final_lvl = scored if prio.get(scored,2) < prio.get(llm_lvl,2) else llm_lvl
+            
         r["level"] = final_lvl
         if final_lvl == "High":    high_count += 1
         elif final_lvl == "Medium": medium_count += 1
