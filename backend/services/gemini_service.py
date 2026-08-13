@@ -12,7 +12,7 @@ from openai import OpenAI
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 logger = logging.getLogger(__name__)
 
-client  = OpenAI(api_key=os.environ.get("SUMOPOD_API_KEY"), base_url="https://ai.sumopod.com/v1")
+client  = OpenAI(api_key="sk-InWrW3EPCg4d7e2rF_V89A", base_url="https://ai.sumopod.com/v1")
 MODEL_FLASH = "gemini/gemini-3.1-flash-lite"   # Basic plan
 MODEL_PRO   = "gemini/gemini-3-flash-preview"   # Pro plan
 _HOST       = socket.gethostname()
