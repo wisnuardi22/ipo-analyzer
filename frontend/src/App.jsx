@@ -928,8 +928,6 @@ export default function App() {
                   ));
                 })()}
               </div>
-            </div>
-
             </div>}
 
             {/* ── BASIC: Upgrade CTA jika bukan Pro ── */}
@@ -1053,8 +1051,6 @@ export default function App() {
                   );
                 })}
               </div>
-            </div>
-
             </div>}
 
             {/* Use of Proceeds + Risk & Benefits */}
