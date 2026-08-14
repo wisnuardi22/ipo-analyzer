@@ -776,7 +776,7 @@ export default function App() {
                   </div>
                   {D.isPro ? (
                     <span className="inline-flex items-center gap-1 bg-gradient-to-r from-purple-100 to-purple-50 dark:from-purple-900/30 dark:to-purple-800/20 border border-purple-200 dark:border-purple-700 rounded-full px-3 py-1.5 text-purple-700 dark:text-purple-300 text-sm font-bold">
-                      <Sparkles className="w-3.5 h-3.5" /> Pro · Gemini 2.5 Pro
+                      <Sparkles className="w-3.5 h-3.5" /> Pro · Gemini 3.1 Pro
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-full px-3 py-1.5 text-gray-500 dark:text-gray-400 text-sm font-medium">
